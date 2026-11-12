@@ -19,8 +19,7 @@ export interface Layout {
  * fits and, on touch devices, reserve side "pillars" for the on-screen buttons so
  * they never cover the action.
  */
-export function applyLayout(scene: Phaser.Scene): Layout {
-  const cam = scene.cameras.main;
+export function applyLayout(scene: Phaser.Scene, cam: Phaser.Cameras.Scene2D.Camera = scene.cameras.main): Layout {
   const W = scene.scale.width;
   const H = scene.scale.height;
   const dpr = W / Math.max(1, window.innerWidth || W);

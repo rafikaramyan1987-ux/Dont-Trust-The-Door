@@ -473,6 +473,41 @@ function drawSkull(ctx: C2D): void {
   ctx.fillRect(18.2, 24, 1.8, 4);
 }
 
+/** Checkpoint flag on a pole; the pole's foot is at (12, 78). */
+function drawFlag(ctx: C2D, on: boolean): void {
+  rr(ctx, 4, 72, 18, 7, 3);
+  ctx.fillStyle = '#5b6077';
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = OUT;
+  ctx.stroke();
+  rr(ctx, 10, 6, 5, 68, 2.5);
+  ctx.fillStyle = '#e9ecf5';
+  ctx.fill();
+  ctx.stroke();
+  ellipse(ctx, 12.5, 6, 4.5, 4.5);
+  ctx.fillStyle = '#ffd23f';
+  ctx.fill();
+  ctx.stroke();
+  const fy = on ? 10 : 46;
+  ctx.beginPath();
+  ctx.moveTo(15, fy);
+  ctx.quadraticCurveTo(26, fy + 2, 37, fy + 3);
+  ctx.quadraticCurveTo(30, fy + 10, 37, fy + 19);
+  ctx.quadraticCurveTo(26, fy + 18, 15, fy + 22);
+  ctx.closePath();
+  ctx.fillStyle = on ? '#6fd36b' : '#b8bdd0';
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  if (on) {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(20, fy + 11); ctx.lineTo(24, fy + 15); ctx.lineTo(31, fy + 6);
+    ctx.lineWidth = 2.6; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // UI icons (white glyphs)
 
@@ -543,9 +578,102 @@ export type SolidFn = (tx: number, ty: number) => boolean;
 
 export interface TerrainTile { tx: number; ty: number }
 
+/** Neighbour mask bits for auto-tiling. */
+export const M_UP = 1, M_RIGHT = 2, M_DOWN = 4, M_LEFT = 8;
+
 /**
- * Draws a set of block tiles as merged rounded shapes into a canvas.
- * `isSolid` decides adjacency (so groups join seamlessly with static ground).
+ * Draws ONE block tile whose top-left corner is (bx, by), given which of its four
+ * neighbours are solid. Exposed edges get the thick outline and rounded convex corners;
+ * exposed tops get the grass / icing band. Tiles drawn side by side merge seamlessly.
+ */
+export function drawTile(
+  ctx: C2D, bx: number, by: number, mask: number, pal: Palette, variant: number,
+  look?: 'cracked' | 'bolted', seam?: { l: boolean; r: boolean },
+): void {
+  const R = 10, O = 4;
+  const u = !!(mask & M_UP), d = !!(mask & M_DOWN), l = !!(mask & M_LEFT), r = !!(mask & M_RIGHT);
+  const radii = [!u && !l ? R : 0, !u && !r ? R : 0, !d && !r ? R : 0, !d && !l ? R : 0] as [number, number, number, number];
+  ctx.fillStyle = pal.outline;
+  rr(ctx, bx, by, TILE, TILE, radii);
+  ctx.fill();
+  const x = bx + (l ? 0 : O);
+  const y = by + (u ? 0 : O);
+  const w = TILE - (l ? 0 : O) - (r ? 0 : O);
+  const h = TILE - (u ? 0 : O) - (d ? 0 : O);
+  const rad = radii.map((v) => (v ? R - O + 1 : 0)) as [number, number, number, number];
+  const g = ctx.createLinearGradient(0, by, 0, by + TILE);
+  g.addColorStop(0, pal.blockLight);
+  g.addColorStop(1, pal.block);
+  rr(ctx, x, y, w, h, rad);
+  ctx.fillStyle = g;
+  ctx.fill();
+  // speckles
+  ctx.fillStyle = pal.blockDark;
+  const seed = [3, 7, 10][variant % 3];
+  ctx.globalAlpha = 0.55;
+  ellipse(ctx, bx + 10 + (seed % 5) * 4, by + 24 + (seed % 3) * 3, 2.4, 1.6);
+  ctx.fill();
+  ellipse(ctx, bx + 27 - (seed % 4) * 3, by + 14 + (seed % 4) * 4, 1.8, 1.3);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  if (!u) {
+    ctx.save();
+    rr(ctx, x, y, w, h, rad);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(bx - 1, by);
+    ctx.lineTo(bx + TILE + 1, by);
+    ctx.lineTo(bx + TILE + 1, by + 12);
+    for (let i = 4; i >= 0; i--) {
+      const px = bx + i * 10;
+      ctx.quadraticCurveTo(px + 5, by + 18, px, by + 12);
+    }
+    ctx.closePath();
+    ctx.fillStyle = pal.top;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(43,45,66,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = pal.topLight;
+    rr(ctx, x + 4, by + 5, Math.max(4, w - 14), 3, 1.5);
+    ctx.fill();
+    ctx.restore();
+  }
+  if (look === 'cracked') {
+    ctx.strokeStyle = 'rgba(43,45,66,0.55)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(bx + 12, by + 16); ctx.lineTo(bx + 17, by + 23); ctx.lineTo(bx + 14, by + 30);
+    ctx.moveTo(bx + 17, by + 23); ctx.lineTo(bx + 25, by + 25);
+    ctx.stroke();
+  }
+  if (look === 'bolted') {
+    ctx.fillStyle = '#e9ecf5';
+    ctx.strokeStyle = pal.outline;
+    ctx.lineWidth = 1.6;
+    for (const [px, py] of [[9, 10], [31, 10]]) {
+      ellipse(ctx, bx + px, by + py, 3, 3);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  if (seam && (seam.l || seam.r)) {
+    ctx.strokeStyle = 'rgba(43,45,66,0.28)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (seam.l) { ctx.moveTo(bx + 1, by + 3); ctx.lineTo(bx + 1, by + TILE - 3); }
+    if (seam.r) { ctx.moveTo(bx + TILE - 1, by + 3); ctx.lineTo(bx + TILE - 1, by + TILE - 3); }
+    ctx.stroke();
+  }
+}
+
+export function maskAt(isSolid: SolidFn, tx: number, ty: number): number {
+  return (isSolid(tx, ty - 1) ? M_UP : 0) | (isSolid(tx + 1, ty) ? M_RIGHT : 0) | (isSolid(tx, ty + 1) ? M_DOWN : 0) | (isSolid(tx - 1, ty) ? M_LEFT : 0);
+}
+
+/**
+ * Draws a set of block tiles (a trap group) into its own canvas, merged with whatever
+ * `isSolid` says is around it, so it is indistinguishable from the ground.
  */
 export function drawTerrain(
   tiles: TerrainTile[], isSolid: SolidFn, pal: Palette,
@@ -554,97 +682,41 @@ export function drawTerrain(
 ): HTMLCanvasElement {
   const [c, ctx] = canvas(bounds.w, bounds.h);
   ctx.translate(-bounds.x, -bounds.y);
-  const R = 10, O = 4;
-  const corner = (tx: number, ty: number) => {
-    const u = isSolid(tx, ty - 1), d = isSolid(tx, ty + 1), l = isSolid(tx - 1, ty), r = isSolid(tx + 1, ty);
-    return { u, d, l, r, radii: [!u && !l ? R : 0, !u && !r ? R : 0, !d && !r ? R : 0, !d && !l ? R : 0] as [number, number, number, number] };
-  };
-  // pass 1: outline silhouettes
-  ctx.fillStyle = pal.outline;
   for (const t of tiles) {
-    const k = corner(t.tx, t.ty);
-    rr(ctx, t.tx * TILE, t.ty * TILE, TILE, TILE, k.radii);
-    ctx.fill();
-  }
-  // pass 2: bodies, inset on exposed sides
-  for (const t of tiles) {
-    const k = corner(t.tx, t.ty);
-    const x = t.tx * TILE + (k.l ? 0 : O);
-    const y = t.ty * TILE + (k.u ? 0 : O);
-    const w = TILE - (k.l ? 0 : O) - (k.r ? 0 : O);
-    const h = TILE - (k.u ? 0 : O) - (k.d ? 0 : O);
-    const rad = k.radii.map((v) => (v ? R - O + 1 : 0)) as [number, number, number, number];
-    const g = ctx.createLinearGradient(0, t.ty * TILE, 0, t.ty * TILE + TILE);
-    g.addColorStop(0, pal.blockLight);
-    g.addColorStop(1, pal.block);
-    rr(ctx, x, y, w, h, rad);
-    ctx.fillStyle = g;
-    ctx.fill();
-    // speckles
-    ctx.fillStyle = pal.blockDark;
-    const seed = (t.tx * 73 + t.ty * 37) % 11;
-    ctx.globalAlpha = 0.55;
-    ellipse(ctx, t.tx * TILE + 10 + (seed % 5) * 4, t.ty * TILE + 24 + (seed % 3) * 3, 2.4, 1.6);
-    ctx.fill();
-    ellipse(ctx, t.tx * TILE + 27 - (seed % 4) * 3, t.ty * TILE + 14 + (seed % 4) * 4, 1.8, 1.3);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    // grass / icing band on exposed tops
-    if (!k.u) {
-      ctx.save();
-      rr(ctx, x, y, w, h, rad);
-      ctx.clip();
-      ctx.beginPath();
-      const by = t.ty * TILE;
-      ctx.moveTo(t.tx * TILE - 1, by);
-      ctx.lineTo(t.tx * TILE + TILE + 1, by);
-      ctx.lineTo(t.tx * TILE + TILE + 1, by + 12);
-      for (let i = 4; i >= 0; i--) {
-        const px = t.tx * TILE + i * 10;
-        ctx.quadraticCurveTo(px + 5, by + 18, px, by + 12);
-      }
-      ctx.closePath();
-      ctx.fillStyle = pal.top;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(43,45,66,0.35)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = pal.topLight;
-      rr(ctx, x + 4, by + 5, Math.max(4, w - 14), 3, 1.5);
-      ctx.fill();
-      ctx.restore();
-    }
-    if (look === 'cracked') {
-      ctx.strokeStyle = 'rgba(43,45,66,0.55)';
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      const bx = t.tx * TILE, by = t.ty * TILE;
-      ctx.moveTo(bx + 12, by + 16); ctx.lineTo(bx + 17, by + 23); ctx.lineTo(bx + 14, by + 30);
-      ctx.moveTo(bx + 17, by + 23); ctx.lineTo(bx + 25, by + 25);
-      ctx.stroke();
-    }
-    if (look === 'bolted') {
-      ctx.fillStyle = '#e9ecf5';
-      ctx.strokeStyle = pal.outline;
-      ctx.lineWidth = 1.6;
-      for (const [bx, by] of [[9, 10], [31, 10]]) {
-        ellipse(ctx, t.tx * TILE + bx, t.ty * TILE + by, 3, 3);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
-    // faint seam where a trap group meets static ground (a fair hint)
-    if (seamWith) {
-      ctx.strokeStyle = 'rgba(43,45,66,0.28)';
-      ctx.lineWidth = 1.5;
-      const bx = t.tx * TILE, by = t.ty * TILE;
-      ctx.beginPath();
-      if (seamWith(t.tx - 1, t.ty)) { ctx.moveTo(bx + 1, by + 3); ctx.lineTo(bx + 1, by + TILE - 3); }
-      if (seamWith(t.tx + 1, t.ty)) { ctx.moveTo(bx + TILE - 1, by + 3); ctx.lineTo(bx + TILE - 1, by + TILE - 3); }
-      ctx.stroke();
-    }
+    const seam = seamWith ? { l: seamWith(t.tx - 1, t.ty), r: seamWith(t.tx + 1, t.ty) } : undefined;
+    drawTile(ctx, t.tx * TILE, t.ty * TILE, maskAt(isSolid, t.tx, t.ty), pal, (t.tx * 7 + t.ty * 13) % 3, look, seam);
   }
   return c;
+}
+
+/** Tileset for the static terrain: 16 neighbour masks × 3 speckle variants, extruded. */
+export const TILESET_PAD = 2; // px of extrusion around every frame (prevents seams when zoomed)
+export function makeTerrainTileset(scene: Phaser.Scene, key: string, pal: Palette): void {
+  if (scene.textures.exists(key)) return;
+  const F = TILE * RES, P = TILESET_PAD, S = F + P * 2;
+  const c = document.createElement('canvas');
+  c.width = S * 16;
+  c.height = S * 3;
+  const ctx = c.getContext('2d')!;
+  ctx.lineJoin = 'round';
+  for (let v = 0; v < 3; v++) for (let m = 0; m < 16; m++) {
+    const ox = m * S + P, oy = v * S + P;
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(RES, RES);
+    drawTile(ctx, 0, 0, m, pal, v);
+    ctx.restore();
+    // extrude the frame's border pixels outward
+    for (let i = 1; i <= P; i++) {
+      ctx.drawImage(c, ox, oy, 1, F, ox - i, oy, 1, F);
+      ctx.drawImage(c, ox + F - 1, oy, 1, F, ox + F - 1 + i, oy, 1, F);
+    }
+    for (let i = 1; i <= P; i++) {
+      ctx.drawImage(c, ox - P, oy, S, 1, ox - P, oy - i, S, 1);
+      ctx.drawImage(c, ox - P, oy + F - 1, S, 1, ox - P, oy + F - 1 + i, S, 1);
+    }
+  }
+  scene.textures.addCanvas(key, c);
 }
 
 export function addTerrainTexture(scene: Phaser.Scene, key: string, c: HTMLCanvasElement): void {
@@ -706,6 +778,8 @@ export function generateTextures(scene: Phaser.Scene): void {
   [c, ctx] = canvas(32, 32); drawCoin(ctx, false); add(scene, 'coin', c);
   [c, ctx] = canvas(32, 32); drawCoin(ctx, true); add(scene, 'coin-spiky', c);
   [c, ctx] = canvas(32, 32); drawSkull(ctx); add(scene, 'skull', c);
+  [c, ctx] = canvas(40, 80); drawFlag(ctx, false); add(scene, 'flag', c);
+  [c, ctx] = canvas(40, 80); drawFlag(ctx, true); add(scene, 'flag-on', c);
   for (const k of ['pause', 'restart', 'sound', 'mute', 'left', 'right', 'up', 'menu', 'play', 'lock', 'star']) {
     [c, ctx] = canvas(32, 32); drawIcon(ctx, k); add(scene, `icon-${k}`, c);
   }

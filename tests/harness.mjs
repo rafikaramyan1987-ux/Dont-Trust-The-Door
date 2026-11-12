@@ -45,11 +45,11 @@ export async function openGame(browser, baseUrl, { viewport = { width: 1280, hei
  * A plan is a list of [keys, until] where `until` is a tick count or a JS
  * expression over the state `s` (x, y, vx, vy, grounded, levelTick, state ...).
  */
-export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks = 3000 } = {}) {
-  return page.evaluate(({ level, plan, stopOnDeath, maxTicks }) => {
+export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks = 9000, checkpoint = false } = {}) {
+  return page.evaluate(({ level, plan, stopOnDeath, maxTicks, checkpoint }) => {
     const T = window.__DTTD;
     T.setManual(true);
-    T.start(level);
+    T.start(level, null, checkpoint);
     const rec = [];
     const push = (k) => { const last = rec[rec.length - 1]; if (last && last[1] === k) last[0]++; else rec.push([1, k]); };
     let s = T.state();
@@ -73,15 +73,15 @@ export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks 
     for (let i = 0; i < 3 && s.state === 'play'; i++) { T.sim('', 1); push(''); s = T.state(); }
     T.release();
     return { rec, final: s, ticks: rec.reduce((a, r) => a + r[0], 0) };
-  }, { level, plan, stopOnDeath, maxTicks });
+  }, { level, plan, stopOnDeath, maxTicks, checkpoint });
 }
 
 /** Replay recorded input (no conditions) and report the outcome. */
-export async function replay(page, level, rec, { extra = 90, render = false } = {}) {
-  return page.evaluate(({ level, rec, extra, render }) => {
+export async function replay(page, level, rec, { extra = 90, render = false, checkpoint = false } = {}) {
+  return page.evaluate(({ level, rec, extra, render, checkpoint }) => {
     const T = window.__DTTD;
     T.setManual(true);
-    T.start(level);
+    T.start(level, null, checkpoint);
     // the recording starts with the idle lead-in ticks that start() already ran
     rec = rec.slice();
     let skip = T.state().levelTick;
@@ -99,5 +99,5 @@ export async function replay(page, level, rec, { extra = 90, render = false } = 
     for (let i = 0; i < extra && s.state === 'play'; i++) { if (render) T.hold('', 1); else T.sim('', 1); s = T.state(); }
     T.release();
     return { final: s, died: s.deathsLevel > d0, deaths: s.deathsLevel - d0, firstDeathTick, deathCause };
-  }, { level, rec, extra, render });
+  }, { level, rec, extra, render, checkpoint });
 }
