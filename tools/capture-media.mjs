@@ -1,6 +1,7 @@
 // Captures marketing media from the real game (production build, deterministic replays):
 //   docs/media/screens/*.png   title, hero expressions, funniest moment of every level
-//   docs/media/trailer-9x16.mp4  20 s vertical gameplay video with soundtrack
+//   docs/media/trailer-9x16.mp4  20 s vertical video (clip list below is tied to the first,
+//                                single-screen slice; run with --video-only to re-record)
 // Usage: npm run build && node tools/capture-media.mjs [--screens-only|--video-only]
 // Requires ffmpeg on PATH and Python 3 with Pillow (for compositing the vertical video).
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';

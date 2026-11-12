@@ -2,19 +2,20 @@
 
 A troll platformer where the level betrays you. Original web game by AtelierPro Aramyan Games.
 
-Short, simple-looking levels where the floor collapses, spikes pop out, the EXIT door grows legs and
-runs away, ceilings fall and "safe" coins bite. Every trap is surprising the first time and fair the
-second time. Death restarts instantly; the death counter is always on screen.
+Long, simple-looking levels where the floor collapses, spikes pop out, the EXIT door grows legs and
+runs away, ceilings fall, springs launch you into spikes, gravity and controls flip and "safe" coins
+bite. Every trap is surprising the first time and fair the second time. Death restarts instantly
+(from the checkpoint flag once you have reached it); the death counter is always on screen.
 
 **Play:** https://rafikaramyan1987-ux.github.io/Dont-Trust-The-Door/ (phone: play in landscape)
 
 <p>
-<img src="docs/media/screens/00-title.png" width="49%">
-<img src="docs/media/screens/00-hero-expressions.png" width="49%">
+<img src="docs/media/screens/level-01.png" width="49%">
+<img src="docs/media/screens/level-07.png" width="49%">
 </p>
 
-This is a **vertical slice**: 10 levels, title screen, level select, pause, restart, mute, saving.
-Everything (art, sound, music) is generated in code; there are no external assets.
+10 levels (163–188 tiles wide, 7–14 troll moments each, a checkpoint in the middle), title screen,
+level select, pause, restart, mute, saving. Everything (art, sound, music) is generated in code.
 
 ## Run it
 
@@ -23,76 +24,71 @@ npm install
 npm run dev        # http://localhost:5173  (also reachable from a phone on the same Wi-Fi)
 npm run build      # production build in dist/ (static files, ~1.5 MB)
 npm run preview    # serve dist/
+npm test           # validate levels → build → headless self-test (needs Playwright's Chromium:
+                   # npx playwright install chromium)
 ```
 
-Controls: **← → / A D** move · **Space / ↑ / W** jump (hold = higher) · **Esc / P** pause · **R** restart ·
-**M** mute. On touch screens, large semi-transparent buttons appear in the side margins, outside the level.
+Controls: **← → / A D** move · **Space / ↑ / W** jump (hold = higher) · **Esc / P** pause · **R** restart
+(from the start of the level) · **M** mute. On touch screens, large semi-transparent buttons sit in
+the side margins, outside the level.
 
-Handy URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touch controls on
-desktop, `?unlock` (on the level-select screen) unlocks every level.
+URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touch controls on desktop,
+`?unlock` (on the level-select screen) unlocks every level.
 
 ## Tech
 
 - Vite + TypeScript + Phaser 3.90 (Arcade physics), WebGL with Canvas fallback.
-- One level = 32×18 tiles of 40 px (1280×720 world, 16:9). The camera zooms to fit any screen; on
-  touch devices side "pillars" are reserved for the buttons so they never cover the action.
-  Portrait phones get a "rotate your phone" message.
+- **Scrolling levels.** Levels are 18 tiles tall (40 px tiles) and up to 200 tiles wide. A world
+  camera follows the hero smoothly (with a little look-ahead) and stays clamped to the level; a
+  second UI camera draws the HUD, touch buttons and overlays in a fixed design space. Phones in
+  landscape show ~22 tiles across (the hero is ~1.6× bigger than in the first slice) and the touch
+  buttons live in side pillars that the world camera never draws into. Desktop shows the full
+  18-tile height. Portrait phones get a "rotate your phone" message.
+- **Terrain** is an auto-tiled Phaser tilemap built from a generated tileset (16 neighbour masks ×
+  3 variants), so only visible tiles are drawn and no texture ever exceeds phone limits. Trap blocks
+  are drawn with the same per-tile painter, so they are indistinguishable from the ground.
 - **Fixed 60 Hz simulation.** The game advances in deterministic 1/60 s ticks (Arcade's world is
-  stepped manually), independent of the display frame rate. That is what makes recorded bot
-  replays exact and the slow-motion effect free of physics side effects.
-- Platformer feel: coyote time (6 ticks), jump buffering (7 ticks), variable jump height (release
-  to cut the jump), quick acceleration/deceleration (no ice), stronger gravity when falling.
-- Juice: squash & stretch, dust puffs, idle blink, expressions (happy / focused / shocked / dizzy),
-  pancake death with stars, screen shake, brief slow motion when a trap fires, particle burst on
-  death, confetti "pop" at the real exit, a door with a face that says "hehe" before betraying you.
-- Audio: WebAudio synth for all sound effects and an original chiptune loop (`src/audio.ts`).
-- Saving: unlocked levels, deaths per level, total deaths and mute state in `localStorage`
-  (all access in try/catch – the game keeps working with storage blocked).
+  stepped manually), independent of the display frame rate. That makes the recorded bot replays
+  exact and the trap slow-motion free of side effects.
+- Feel: coyote time, jump buffering, variable jump height, snappy acceleration, stronger fall gravity.
+- **Checkpoint:** one flag per level. A death after touching it respawns there; the whole level is
+  rebuilt so every trap is re-armed, except triggers marked `keep` that lie before the flag (the door
+  that already fled stays where it ran to). The restart button always goes back to the start.
+- Saving: unlocked levels, deaths per level, total deaths and mute in `localStorage` (try/catch).
 
 ```
 src/
-  main.ts            game config, DPR-aware canvas sizing
-  config.ts          tuning constants, world palettes
-  art.ts             every texture, drawn with Canvas 2D
-  audio.ts           sound effects + music (live and offline rendering)
-  input.ts layout.ts keyboard/touch input, responsive camera layout
-  save.ts            persistence
-  game/Hero.ts       hero rig (expressions, squash & stretch)
-  game/Door.ts       the EXIT door character
-  scenes/            Boot, Title, Select, Game (simulation, traps, HUD, overlays)
-  levels/*.json      ← the levels
-  testHooks.ts       test-only API (active with ?test)
-tests/               level validator, bot replays, self-test
-tools/               screenshot + trailer capture
+  scenes/GameScene.ts   simulation, traps & triggers, cameras, HUD, checkpoint
+  game/Hero.ts Door.ts  the two characters
+  art.ts audio.ts       procedural textures, sound and music
+  levels/*.json         ← the levels (generated by the builder, or hand-written)
+tools/level-builder/    segments.mjs (troll set-pieces) + build.mjs (the 10 level recipes)
+tests/                  validator, plans.json, recorded replays, self-test
+tools/capture-media.mjs screenshots (and the trailer)
 ```
 
-## Adding levels (data files)
+## Levels
 
-Each level is one JSON file in [`src/levels/`](src/levels). Files are loaded automatically and
-ordered by name (`11-my-level.json` becomes level 11). No code changes are needed.
+| # | Name | Width | Bot win (s) | Troll moments |
+|---|---|---|---|---|
+| 1 | Hello, Floor | 164 | 27.4 | 7: The floor sinks under you · The EXIT grows legs and runs away · The floor collapses into spikes · Spikes breathe in and out of the floor · Ceiling spikes drop on you · The floor sinks under you (2) · The EXIT makes a last dash up the stairs |
+| 2 | Solid Ground? | 188 | 29.4 | 12: The floor collapses into spikes · The floor sinks under you · A fake floor you fall straight through · The bridge crumbles under you · The floor collapses into spikes (2) · Platforms vanish under your feet · A fake floor you fall straight through (2) · The safe pillar grows spikes · Spikes pop up where a small hop lands · The high walkway collapses · The floor collapses into spikes (3) · The last step sinks |
+| 3 | Exit, Stage Left | 179 | 28.1 | 10: The EXIT grows legs and runs away · Spikes pop up where a normal jump lands · A fake EXIT that bites · The low tunnel ceiling hides spikes · The floor collapses into spikes · The EXIT runs away again · Platforms vanish under your feet · Ceiling spikes drop on you · A fake EXIT that bites (2) · The EXIT makes a last dash up the stairs |
+| 4 | Landing Zone | 184 | 30.9 | 12: Spikes pop up where a normal jump lands · Fake spikes (walk right through) · Hidden spikes behind the fake ones · Spikes pop up where a small hop lands · Spikes breathe in and out of the floor · The safe pillar grows spikes · Ceiling spikes drop on you · Fake spikes (walk right through) (2) · Hidden spikes behind the fake ones (2) · The low tunnel ceiling hides spikes · The bridge crumbles under you · The floor collapses into spikes |
+| 5 | Heavy Ceiling | 181 | 41.3 | 10: Ceiling spikes drop on you · The ceiling falls (safe spot: under the bolted spikes) · A ceiling block slams down in rhythm · Spikes breathe in and out of the floor · The floor collapses into spikes · The ceiling falls (safe spot: under the bolted spikes) (2) · The low tunnel ceiling hides spikes · A ceiling block slams down in rhythm (2) · Spikes pop up where a small hop lands · Ceiling spikes drop on you (2) |
+| 6 | Spring Fever | 188 | 29.7 | 8: The jump pad launches you into ceiling spikes · Platforms vanish under your feet · The safe pillar grows spikes · The jump pad launches you into ceiling spikes (2) · A fake floor you fall straight through · Spikes pop up where a normal jump lands · A ceiling block slams down in rhythm · The floor collapses into spikes |
+| 7 | Too Many Doors | 181 | 28.2 | 13: A fake EXIT that bites · A fake floor you fall straight through · Fake spikes (walk right through) · Hidden spikes behind the fake ones · The bridge crumbles under you · Platforms vanish under your feet · A fake EXIT that bites (2) · Spikes breathe in and out of the floor · The floor collapses into spikes · The high walkway collapses · Spikes pop up where a small hop lands · The real EXIT hides inside the wall · A fake EXIT in front of the real one |
+| 8 | Upside Downer | 184 | 32.8 | 11: Gravity flips – drifting lands you in ceiling spikes · Gravity flips back above a spike field · Left and right swap · The low tunnel ceiling hides spikes · A ceiling block slams down in rhythm · Platforms vanish under your feet · Gravity flips – drifting lands you in ceiling spikes (2) · Gravity flips back above a spike field (2) · Left and right swap (2) · A fake floor you fall straight through · The ceiling falls (safe spot: under the bolted spikes) |
+| 9 | Greedy Little Blob | 186 | 33.0 | 13: A coin on the floor bites · The coin arc over the pit bites · A fake floor you fall straight through · Left and right swap · The bridge crumbles under you · The safe pillar grows spikes · A coin on the floor bites (2) · The coin arc over the pit bites (2) · Platforms vanish under your feet · The low tunnel ceiling hides spikes · A ceiling block slams down in rhythm · The ceiling falls (safe spot: under the bolted spikes) · The last step sinks |
+| 10 | The Grand Betrayal | 184 | 32.2 | 13: The EXIT grows legs and runs away · A spike wall chases you · The floor drops while you run · The jump pad launches you into ceiling spikes · Spikes breathe in and out of the floor · The EXIT runs away again · Gravity flips – drifting lands you in ceiling spikes · Gravity flips back above a spike field · A ceiling block slams down in rhythm · A fake EXIT that bites · The floor collapses into spikes · Platforms vanish under your feet · The EXIT makes a last dash up the stairs |
 
-```jsonc
-{
-  "id": 2,
-  "name": "Solid Ground",
-  "world": 0,                       // colour palette: 0 meadow, 1 candy, 2 twilight, 3 sunset
-  "winMessage": "The floor lied.",  // shown on the level-complete card
-  "deathQuips": ["The floor lied.", "Still lying."],   // optional, shown on death
-  "hints": [{ "x": 13, "y": 10, "text": "jump it?", "afterDeaths": 2 }],
-  "map": [                          // 18 rows × 32 characters
-    "................................",
-    "...",
-    ".P...........................D..",
-    "############aaa#################",
-    "############^^^#################",
-    "################################"
-  ],
-  "groups": { "a": { "tile": "#", "cover": [[12,16],[13,16],[14,16]] } },
-  "triggers": [ { "when": { "touch": "a" }, "do": [ { "fall": "a", "shake": 3 } ] } ]
-}
-```
+Bot times are a frame-perfect run at full speed with zero hesitation; a person's first clean run is
+much slower (reading each trap, waiting for crushers and breathing spikes).
 
-**Map legend**
+## Level data format
+
+Each level is one JSON file in [`src/levels/`](src/levels), loaded automatically and ordered by file
+name. The map is **18 rows of equal length (32–200 characters)**:
 
 | char | meaning | char | meaning |
 |---|---|---|---|
@@ -100,119 +96,148 @@ ordered by name (`11-my-level.json` becomes level 11). No code changes are neede
 | `^ v < >` | spikes (pointing up/down/left/right) | `=` | jump pad |
 | `o` | coin (genuine) | `P` | player start |
 | `D` | the real EXIT (bottom tile; hangs upside-down if attached to a ceiling) | `F` | fake EXIT (bites) |
-| `a`–`z` (not `o`/`v`) | tile of a named **group** that triggers can control | | |
+| `C` | checkpoint flag (exactly one) | `a`–`z` (not `o`/`v`) | tile of a named **group** |
 
-**Groups** (`"groups": { "a": {...} }`): `tile` (what the group is made of: `#`, a spike char, `=`,
-`o`), `hidden` (starts retracted/invisible, e.g. pop-up spikes), `fake` (a wall you can walk through),
-`trapCoin` (coin turns into a spiky ball), `look` (`cracked` / `bolted` visual hints), `cover`
-(extra tiles drawn as part of the group – e.g. hides a spike pit under a collapsing floor).
+```jsonc
+{
+  "id": 2, "name": "Solid Ground?", "world": 0, "winMessage": "The floor lied. Repeatedly.",
+  "deathQuips": ["The floor lied.", "Still lying."],
+  "hints": [{ "x": 13, "y": 11, "text": "jump it!", "afterDeaths": 2 }],  // shown after 2 deaths near it
+  "map": ["...", "..."],
+  "groups": { "a": { "tile": "#", "cover": [[12,16],[13,16],[14,16]] } },
+  "triggers": [ { "when": { "touch": "a" }, "do": [ { "fall": "a", "shake": 3 } ], "troll": "t1" } ],
+  "trolls": [ { "id": "t1", "name": "The floor collapses into spikes" } ],
+  "fakeExits": { "57": "t4" }                                       // F at tile x 57 → troll t4
+}
+```
 
-**Triggers** fire once per attempt. `when`: `zone: [x, y, w, h]` (tiles; optional `airborne` /
-`grounded`), `touch: "a"` (touching a group), `start: true`, or `after: "<trigger id>"`; optional
-`delay` in ticks (60 = 1 s). **Actions** (`do`):
+**Groups:** `tile` (`#`, a spike char, `=`, `o`), `hidden` (starts retracted / invisible), `fake`
+(blocks you fall through, spikes that are harmless and squash flat), `trapCoin` (coin turns into a
+spiky ball), `look` (`cracked` / `bolted` hints), `cover` (extra tiles drawn as part of the group, e.g.
+hiding a pit), `troll` (troll id credited when its built-in trick fires).
+
+**Triggers** fire once per attempt. `when`: `zone: [x, y, w, h]` (tiles, may be fractional; optional
+`airborne` / `grounded`), `touch: "a"`, `start: true`, or `after: "<trigger id>"`. Options: `delay`
+(ticks, 60 = 1 s), `every` (repeat the actions every N ticks – rhythmic traps), `troll` (troll id),
+`keep` (see Checkpoint above). **Actions:**
 
 | action | effect |
 |---|---|
-| `{ "fall": "a", "shake": 6 }` | group shakes, then drops away (no longer solid) |
+| `{ "fall": "a", "shake": 6 }` | group shakes, then drops away |
 | `{ "pop": "a" }` / `{ "retract": "a" }` | hidden spikes shoot out / go back |
 | `{ "move": "a", "by": [0, 4], "ticks": 14, "deadly": true, "returnAfter": 50, "returnTicks": 40 }` | slide a group; `deadly` crushes while moving |
-| `{ "chase": "w", "vel": [3.4, 0], "untilX": 25 }` | move a group continuously (px per tick) |
+| `{ "chase": "w", "vel": [3.4, 0], "untilX": 23 }` | move a group continuously (px per tick) |
 | `{ "doorRun": [[26,14],[28,12]], "speed": 7, "hehe": 28 }` | the EXIT says "hehe", grows legs and runs along tile waypoints |
-| `{ "doorHehe": 40 }` | the door just giggles |
 | `{ "gravity": "flip" }` / `"normal"` | flip gravity |
-| `{ "say": "text", "at": "hero" \| "door" \| [x, y], "ticks": 60 }` | speech bubble |
-| `{ "shake": 4, "ticks": 30 }`, `{ "slowmo": 20 }`, `{ "show": "a" }`, `{ "hide": "a" }`, `{ "scare": true }` | effects |
+| `{ "controls": "flip" }` / `"normal"` | swap left / right |
+| `{ "show": "a" }` / `{ "hide": "a" }` | make a group appear / vanish (vanishing platforms) |
+| `{ "say": "text", "at": "hero" \| "door" \| [x, y] }`, `{ "doorHehe": 40 }`, `{ "shake": 4 }`, `{ "slowmo": 20 }`, `{ "scare": true }` | effects |
 
-Every trap action automatically adds the juice: shocked face, a short slow motion and a sound.
+Every trap action adds the juice automatically (shocked face, short slow motion, sound); repeats of a
+rhythmic trap stay quiet.
 
-`npm run test:levels` validates all level files (size, legend, group and trigger references).
-To make a new level part of the self-test, add a `win` plan (and `traps`) to
-[`tests/plans.mjs`](tests/plans.mjs) and run `npm run record` – it records frame-exact replays.
+### Making levels fast: the level builder
+
+The shipped levels are composed from **troll set-pieces** in
+[`tools/level-builder/segments.mjs`](tools/level-builder/segments.mjs) – collapsing floors, fake
+floors, pop-up spikes, fake spikes, crushers, rhythmic thwomps, breathing spikes, vanishing
+platforms, crumbling bridges, springs, gravity and control flips, biting coins, a chasing spike wall,
+fake exits, a hidden real exit, low spiked tunnels, towers, a running door. Each segment draws its
+tiles, registers its triggers and troll names, and also writes the bot plan that beats it and the
+plan that falls for it. A level is a list of segments in
+[`build.mjs`](tools/level-builder/build.mjs):
+
+```js
+segments: [S.start, S.collapse, S.sink, S.fakeFloor, [S.pit, 3], S.bridge, S.checkpoint, ...]
+```
+
+```bash
+npm run levels    # regenerate src/levels/*.json and tests/plans.json
+npm run build && npm run record   # record frame-exact bot replays (tests/replays/)
+npm test          # validate + self-test
+```
 
 ## Self-test
 
-```bash
-npm test     # validate levels → build → headless self-test (needs Playwright's Chromium)
-```
-
-- `tests/plans.mjs` – condition-based scripts ("hold → until x ≥ 440, then jump 16 ticks…"), used
-  only to *author* replays.
-- `tests/replays/level-XX.json` – the recorded, frame-exact inputs: one `win` run per level and
-  one or more `traps` runs per level.
-- `tests/run-selftest.mjs` – replays everything against the production build in headless Chromium.
+- `npm run test:levels` – every level: 18 equal rows, width 32–200, legal characters, one `P`, one
+  `D`, one `C`, groups and trigger references valid, ≥ 5 trolls and each troll actually wired up.
+- `tests/replays/level-NN.json` – recorded frame-exact inputs: `win` (from the start), `cp` (from
+  the checkpoint) and one replay per trap that must kill.
+- `tests/run-selftest.mjs` – against the production build in headless Chromium: every level won
+  in real time by the bot at a steady frame rate; won again from the start and from the checkpoint in
+  the deterministic sim; every trap replay kills exactly once; **every listed troll moment fires**;
+  checkpoint respawn lands on the flag (a fled door stays fled) and restart returns to the start;
+  death counter / HUD / save / reload / blocked storage; phone landscape (~22 tiles visible, buttons
+  outside the level, real multi-touch input), portrait "rotate" message, desktop layout; no console
+  errors; build < 10 MB. CI (`.github/workflows/ci.yml`) runs all of this on every push.
 
 ### Results (latest run)
 
-**49/49 checks passed** (2026-11-12, `npm test`).
+**158/158 checks passed** (2026-11-12, `npm test`). Highlights:
 
 | | check | result |
 |---|---|---|
-| ✅ | bot completes level 1 in real time | won, 5.0 s, 60 fps, p95 frame 19.6 ms |
-| ✅ | bot completes level 2 in real time | won, 4.2 s, 60 fps, p95 frame 18.6 ms |
-| ✅ | bot completes level 3 in real time | won, 8.7 s, 60 fps, p95 frame 18.1 ms |
-| ✅ | bot completes level 4 in real time | won, 4.3 s, 60 fps, p95 frame 17.9 ms |
-| ✅ | bot completes level 5 in real time | won, 8.3 s, 60 fps, p95 frame 18.4 ms |
-| ✅ | bot completes level 6 in real time | won, 5.6 s, 60 fps, p95 frame 18.5 ms |
-| ✅ | bot completes level 7 in real time | won, 0.7 s, 60 fps, p95 frame 18.5 ms |
-| ✅ | bot completes level 8 in real time | won, 5.2 s, 60 fps, p95 frame 19.6 ms |
-| ✅ | bot completes level 9 in real time | won, 4.1 s, 60 fps, p95 frame 19.3 ms |
-| ✅ | bot completes level 10 in real time | won, 5.0 s, 60 fps, p95 frame 18.6 ms |
-| ✅ | stable ~60 fps during the real-time bot run | avg 60.0 fps, worst level avg 59.9 fps (480×270, software WebGL) |
+| ✅ | bot completes level 1 in real time | won, 27.4 s, 60 fps, p95 frame 19.4 ms |
+| ✅ | bot completes level 2 in real time | won, 29.4 s, 60 fps, p95 frame 19.0 ms |
+| ✅ | bot completes level 3 in real time | won, 28.1 s, 60 fps, p95 frame 18.9 ms |
+| ✅ | bot completes level 4 in real time | won, 30.9 s, 60 fps, p95 frame 18.9 ms |
+| ✅ | bot completes level 5 in real time | won, 41.3 s, 60 fps, p95 frame 18.8 ms |
+| ✅ | bot completes level 6 in real time | won, 29.7 s, 60 fps, p95 frame 18.6 ms |
+| ✅ | bot completes level 7 in real time | won, 28.2 s, 60 fps, p95 frame 18.9 ms |
+| ✅ | bot completes level 8 in real time | won, 32.8 s, 60 fps, p95 frame 19.6 ms |
+| ✅ | bot completes level 9 in real time | won, 33.0 s, 60 fps, p95 frame 19.2 ms |
+| ✅ | bot completes level 10 in real time | won, 32.2 s, 60 fps, p95 frame 19.4 ms |
+| ✅ | stable ~60 fps during the real-time bot run | avg 60.0 fps, worst level avg 60.0 fps (480×270, software WebGL) |
 | ✅ | progress saved: all 10 levels completed/unlocked | {"unlocked":10,"completed":10} |
-| ✅ | trap kills: level 1 – the gap (tutorial) | cause=pit at tick 221 |
-| ✅ | deterministic replay wins level 1 | 301 ticks = 5.0 s |
-| ✅ | trap kills: level 2 – floor collapses into spikes | cause=spikes at tick 103 |
-| ✅ | deterministic replay wins level 2 | 228 ticks = 3.8 s |
-| ✅ | trap kills: level 3 – chasing the door into the gap | cause=spikes at tick 450 |
-| ✅ | deterministic replay wins level 3 | 484 ticks = 8.1 s |
-| ✅ | trap kills: level 4 – spikes pop where a normal jump lands | cause=spikes at tick 152 |
-| ✅ | trap kills: level 4 – second patch: the tiny hop lands on new spikes | cause=spikes at tick 172 |
-| ✅ | deterministic replay wins level 4 | 224 ticks = 3.7 s |
-| ✅ | trap kills: level 5 – the ceiling falls | cause=crush at tick 189 |
-| ✅ | deterministic replay wins level 5 | 443 ticks = 7.4 s |
-| ✅ | trap kills: level 6 – jump pad into ceiling spikes | cause=spikes at tick 89 |
-| ✅ | deterministic replay wins level 6 | 307 ticks = 5.1 s |
-| ✅ | trap kills: level 7 – the fake EXIT bites | cause=fakedoor at tick 199 |
-| ✅ | deterministic replay wins level 7 | 24 ticks = 0.4 s |
-| ✅ | trap kills: level 8 – gravity flips into ceiling spikes | cause=spikes at tick 147 |
-| ✅ | deterministic replay wins level 8 | 270 ticks = 4.5 s |
-| ✅ | trap kills: level 9 – the coin on the floor bites | cause=coin at tick 72 |
-| ✅ | trap kills: level 9 – coin arc over the pit | cause=coin at tick 118 |
-| ✅ | deterministic replay wins level 9 | 224 ticks = 3.7 s |
-| ✅ | trap kills: level 10 – the floor drops | cause=spikes at tick 135 |
-| ✅ | trap kills: level 10 – the spike wall catches you | cause=spikes at tick 134 |
-| ✅ | deterministic replay wins level 10 | 251 ticks = 4.2 s |
-| ✅ | death counter equals number of deaths | 13 == 13 |
-| ✅ | HUD death counter shows the total | HUD "13" |
-| ✅ | save survives a page reload | totalDeaths=13 |
+| ✅ | level 1 is completable from the start | 26.3 s, 164 tiles |
+| ✅ | level 1 is completable from its checkpoint | 14.6 s |
+| ✅ | level 2 is completable from the start | 25.9 s, 188 tiles |
+| ✅ | level 2 is completable from its checkpoint | 17.7 s |
+| ✅ | level 3 is completable from the start | 26.1 s, 179 tiles |
+| ✅ | level 3 is completable from its checkpoint | 15.9 s |
+| ✅ | level 4 is completable from the start | 27.3 s, 184 tiles |
+| ✅ | level 4 is completable from its checkpoint | 15.0 s |
+| ✅ | level 5 is completable from the start | 38.3 s, 181 tiles |
+| ✅ | level 5 is completable from its checkpoint | 19.8 s |
+| ✅ | level 6 is completable from the start | 28.6 s, 188 tiles |
+| ✅ | level 6 is completable from its checkpoint | 17.6 s |
+| ✅ | level 7 is completable from the start | 24.6 s, 181 tiles |
+| ✅ | level 7 is completable from its checkpoint | 14.9 s |
+| ✅ | level 8 is completable from the start | 29.8 s, 184 tiles |
+| ✅ | level 8 is completable from its checkpoint | 20.0 s |
+| ✅ | level 9 is completable from the start | 29.5 s, 186 tiles |
+| ✅ | level 9 is completable from its checkpoint | 19.9 s |
+| ✅ | level 10 is completable from the start | 28.9 s, 184 tiles |
+| ✅ | level 10 is completable from its checkpoint | 15.6 s |
+| ✅ | death counter equals number of deaths | 92 == 92 |
+| ✅ | HUD death counter shows the total | HUD "92" |
+| ✅ | save survives a page reload | totalDeaths=92, per level {"1":3,"2":10,"3":7,"4":10,"5":10,"6":8,"7":11,"8":11,"9":12,"10":10} |
 | ✅ | blocked localStorage is handled (try/catch) | ok |
-| ✅ | restart after death is instant (< 0.3 s) | 266 ms |
-| ✅ | CPU time per frame at 1280×720 is far below the 16.7 ms budget | 0.53 ms/frame |
-| ✅ | level rebuild on restart is cheap | 1.64 ms (restart delay itself is 16 ticks = 267 ms) |
+| ✅ | restart after death is instant (< 0.3 s) | 270 ms |
+| ✅ | CPU time per frame at 1280×720 is far below the 16.7 ms budget | 0.87 ms/frame |
 | ✅ | desktop 1280×720: level fills the screen, no touch buttons | {"zoom":1,"touch":false} |
+| ✅ | phone landscape: camera shows ~22 tiles across and follows the hero | 22.0 tiles visible, hero 19.6 css px tall (was 12.5 px when the whole 32-tile level was shown) |
 | ✅ | phone landscape 844×390: buttons visible, ≥44 px, outside the level area | level spans 114–730 css px; buttons left 52×99@29, right 52×99@85, jump 106×117@787 |
-| ✅ | touch: holding ▶ moves the hero right | x 60 → 95, vx 300 |
-| ✅ | touch: second finger on jump makes the hero jump (multi-touch) | min y 531 (ground 586) |
+| ✅ | touch: holding ▶ moves the hero right | x 100 → 145, vx 300 |
+| ✅ | touch: second finger on jump makes the hero jump (multi-touch) | min y 522 (ground 586) |
 | ✅ | phone portrait 390×844 shows "rotate your phone" | {"display":"flex","text":"Rotate your phone"} |
 | ✅ | no console errors |  |
-| ✅ | production build under 10 MB | 1.49 MB |
+| ✅ | production build under 10 MB | 1.55 MB |
+| ✅ | 92 trap replays each kill exactly once | see test-results/selftest.json |
 
-Notes: headless Chromium has no GPU – WebGL is rasterised on the CPU by SwiftShader, which caps a
-1280×720 canvas at ~12–18 fps no matter what is drawn. The real-time bot run therefore uses a small
-window, and the CPU cost of a full 1280×720 frame is measured separately (≈0.6 ms of the 16.7 ms
-budget); on a phone the GPU does the rasterising.
+Headless Chromium has no GPU (WebGL is rasterised on the CPU), so the real-time run uses a small
+window and the CPU cost of a full 1280×720 frame is measured separately; on a phone the GPU does the
+drawing. On CI runners the timing checks are reported but not enforced.
 
 ## Media
 
-- Screenshots: [`docs/media/screens/`](docs/media/screens) (title, hero expressions, level select,
-  the funniest moment of every level, phone/desktop layouts).
-- Trailer: [`docs/media/trailer-9x16.mp4`](docs/media/trailer-9x16.mp4) – 20 s, 1080×1920, 30 fps,
-  with sound. Re-generate with `npm run build && npm run media` (needs ffmpeg and Python Pillow).
-
-All captures come from the real game driven by the recorded replays.
+- Screenshots (phone landscape 844×390 with the touch controls): [`docs/media/screens/`](docs/media/screens)
+  – title, hero expressions, level select, a troll moment from every level, the checkpoint, desktop.
+  Regenerate with `npm run build && node tools/capture-media.mjs --screens-only`.
+- Trailer: [`docs/media/trailer-9x16.mp4`](docs/media/trailer-9x16.mp4) – 20 s vertical video recorded
+  from the first (single-screen) vertical slice.
 
 ## Deployment
 
-`.github/workflows/pages.yml` builds on every push to `main` (and the slice branch) and publishes
-`dist/` to the `gh-pages` branch. If the site is not live yet: **Settings → Pages → Build and
-deployment → Source: Deploy from a branch → `gh-pages` / `(root)`**.
+`.github/workflows/pages.yml` builds every push to `main` and publishes `dist/` to the `gh-pages`
+branch (GitHub Pages: Settings → Pages → Deploy from a branch → `gh-pages` / root).
