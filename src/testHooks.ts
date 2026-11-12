@@ -8,6 +8,39 @@ import { Input, Keys } from './input';
 import { Save } from './save';
 import { Audio, SfxName, renderSoundtrack } from './audio';
 import { LEVELS } from './levels';
+import { Hero } from './game/Hero';
+import { label } from './ui';
+import { applyLayout } from './layout';
+import { RES } from './art';
+
+/** Test/marketing only: the hero's four expressions side by side. */
+class ShowcaseScene extends Phaser.Scene {
+  heroes: Hero[] = [];
+  constructor() { super('Showcase'); }
+  create(): void {
+    applyLayout(this);
+    this.add.image(-200, -200, 'bg-0').setOrigin(0).setDisplaySize(1680, 1120);
+    this.add.tileSprite(-200, -200, 1680, 1120, 'dots-0').setOrigin(0).setTileScale(1 / RES);
+    const names = ['HAPPY', 'FOCUSED', 'SHOCKED', 'DIZZY / DEAD'];
+    this.heroes = names.map((n, i) => {
+      const x = 200 + i * 293;
+      const g = this.add.graphics();
+      g.fillStyle(0x2b2d42, 0.12).fillEllipse(x, 470, 170, 30);
+      label(this, x, 560, n, 34, '#fff6d5', 9);
+      return new Hero(this, x, 470).setScale(4.2);
+    });
+    label(this, 640, 110, 'MEET THE HERO', 56, '#ffd23f', 12);
+    this.heroes[2].flash('shock', 999);
+    this.heroes[3].die();
+  }
+  update(_t: number, d: number): void {
+    const dt = d / 1000;
+    this.heroes[0].animate(dt, 0, true, false, 0);
+    this.heroes[1].animate(dt, 300, true, false, 0);
+    this.heroes[2].animate(dt, 0, true, false, 0);
+    this.heroes[3].animate(dt, 0, true, false, 0);
+  }
+}
 
 const FRAME = 1000 / 60;
 
@@ -33,7 +66,18 @@ export function installTestHooks(game: Phaser.Game): void {
     }
   };
 
+  game.scene.add('Showcase', ShowcaseScene, false);
   const api = {
+    showcase() {
+      game.scene.getScenes(true).forEach((s) => game.scene.stop(s.scene.key));
+      game.scene.start('Showcase');
+      if (manual) step(3);
+    },
+    scene(key: string, data?: object) {
+      game.scene.getScenes(true).forEach((s) => game.scene.stop(s.scene.key));
+      game.scene.start(key, data);
+      if (manual) step(3);
+    },
     levels: LEVELS.length,
     game,
     Save,
@@ -56,13 +100,14 @@ export function installTestHooks(game: Phaser.Game): void {
       for (let i = 0; i < n; i++) s.fixedTick();
     },
     release() { Input.bot = null; },
+    /** Start a level; with `replay` the bot's recorded inputs drive it from tick 0. */
     start(level: number, replay?: [number, string][]) {
       game.scene.getScenes(true).forEach((s) => { if (s.scene.key !== 'Game') game.scene.stop(s.scene.key); });
       const g = game.scene.getScene('Game');
-      if (g.scene.isActive()) g.scene.restart({ level });
-      else game.scene.start('Game', { level });
+      const data = { level, replay: replay ? expandReplay(replay) : undefined };
+      if (g.scene.isActive()) g.scene.restart(data);
+      else game.scene.start('Game', data);
       if (manual) step(2);
-      if (replay) api.setReplay(replay);
     },
     setReplay(rle: [number, string][] | null) {
       const s = scene();

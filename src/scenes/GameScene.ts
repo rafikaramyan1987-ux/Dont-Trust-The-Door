@@ -150,10 +150,10 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data: { level?: number }): void {
+  init(data: { level?: number; replay?: Keys[] }): void {
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
     this.deathsLevel = 0;
-    this.replay = null;
+    this.replay = data.replay ?? null;
     this.paused = false;
     this.overlay = null;
     this.tick = 0;
@@ -229,12 +229,14 @@ export class GameScene extends Phaser.Scene {
     // system buttons: in the right pillar on touch layouts, top-right otherwise
     const P = L.pillar;
     if (P > 60) {
-      const cx = WORLD_W + P / 2;
-      const size = Math.min(76, P * 0.42);
-      this.sysButtons.forEach((b, i) => {
-        b.setScale(size / 64);
-        b.setPosition(cx + (i - 1) * (size + 6), Math.max(L.top, 0) + size * 0.75);
-      });
+      // restart + pause in the right pillar, mute in the left pillar under the level name
+      const size = Math.min(72, P * 0.4);
+      const top = Math.max(L.top, 0) + size * 0.7;
+      const [restart, mute, pause] = this.sysButtons;
+      for (const b of this.sysButtons) b.setScale(size / 64);
+      restart.setPosition(WORLD_W + P / 2 - size * 0.58, top);
+      pause.setPosition(WORLD_W + P / 2 + size * 0.58, top);
+      mute.setPosition(-P / 2, top + size * 1.25);
     } else {
       this.sysButtons.forEach((b, i) => {
         b.setScale(1);
@@ -330,7 +332,7 @@ export class GameScene extends Phaser.Scene {
     Input.touch.left = t.left;
     Input.touch.right = t.right;
     Input.touch.jump = t.jump;
-    for (const b of this.touchBtns) b.img.setAlpha(t[b.key] ? 0.95 : 0.55).setScale(t[b.key] ? 0.94 : 1);
+    for (const b of this.touchBtns) b.img.setAlpha(t[b.key] ? 1 : 0.7).setScale(t[b.key] ? 0.94 : 1);
   }
 
   private layoutTouch(): void {
@@ -348,14 +350,15 @@ export class GameScene extends Phaser.Scene {
         const b = this.touchBtns[i];
         const g = b.img.getData('g') as Phaser.GameObjects.Graphics;
         g.clear();
-        g.fillStyle(0x2b2d42, 0.55);
+        g.fillStyle(0x2b2d42, 0.5);
         g.fillRoundedRect(-w / 2, -h / 2, w, h, Math.min(28, w / 3));
-        g.lineStyle(5, 0xffffff, 0.8);
+        g.lineStyle(6, 0xffffff, 0.95);
         g.strokeRoundedRect(-w / 2, -h / 2, w, h, Math.min(28, w / 3));
         b.img.setPosition(x + w / 2, y + h / 2);
+        b.img.setData('size', { w, h });
         // hit zone is generous: full pillar half, lower 65% of the screen
         b.zone = { x: x - 5, y: L.top + usableH * 0.3, w: w + 10, h: usableH * 0.7 + 40 };
-        b.img.setAlpha(0.55);
+        b.img.setAlpha(0.7);
       };
       const left0 = L.left + 6;
       draw(0, left0, bottom - bh, bw, bh);
@@ -375,6 +378,7 @@ export class GameScene extends Phaser.Scene {
         g.lineStyle(5, 0xffffff, 0.7);
         g.strokeCircle(0, 0, s / 2);
         b.img.setPosition(x, y);
+        b.img.setData('size', { w: s, h: s });
         b.zone = { x: x - s / 2 - 10, y: y - s / 2 - 10, w: s + 20, h: s + 20 };
       };
       draw(0, 70, WORLD_H - 70);
@@ -465,7 +469,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     for (const [, d] of Object.entries(gdefs)) if (d.tile === '#' && !d.hidden) for (const [cx, cy] of d.cover ?? []) solidAll.add(key(cx, cy));
-    const isSolidAll = (x: number, y: number) => x < 0 || x >= COLS || y >= ROWS ? (y >= 0 && solidAll.has(key(Math.max(0, Math.min(COLS - 1, x)), Math.min(ROWS - 1, y)))) : solidAll.has(key(x, y));
+    const isSolidAll = (x: number, y: number): boolean => solidAll.has(key(Math.max(0, Math.min(COLS - 1, x)), Math.max(0, Math.min(ROWS - 1, y))));
 
     // Static terrain: one cached texture + merged physics rectangles
     const tKey = `terrain-${L.id}`;
@@ -474,6 +478,27 @@ export class GameScene extends Phaser.Scene {
       addTerrainTexture(this, tKey, drawTerrain(staticTiles, isSolidAll, this.pal, { x: 0, y: 0, w: WORLD_W, h: WORLD_H }));
     }
     this.track(this.add.image(0, 0, tKey).setOrigin(0).setScale(1 / RES).setDepth(0));
+
+    // Extend solid bottom / top rows past the level edge so wide screens never show floating ground.
+    const ext = this.track(this.add.graphics().setDepth(-0.5));
+    const outline = Phaser.Display.Color.HexStringToColor(this.pal.outline).color;
+    const fillC = Phaser.Display.Color.HexStringToColor(this.pal.block).color;
+    for (const [row, y0, h] of [[ROWS - 1, WORLD_H - 2, 600], [0, -600, 602]] as const) {
+      let x = 0;
+      while (x < COLS) {
+        if (!isSolidAll(x, row)) { x++; continue; }
+        let x2 = x;
+        while (x2 + 1 < COLS && isSolidAll(x2 + 1, row)) x2++;
+        const ex0 = x === 0 ? -800 : x * TILE, ex1 = x2 === COLS - 1 ? WORLD_W + 800 : (x2 + 1) * TILE;
+        ext.fillStyle(outline, 1).fillRect(ex0, y0, ex1 - ex0, h);
+        ext.fillStyle(fillC, 1).fillRect(ex0 + (x === 0 ? 0 : 4), y0, ex1 - ex0 - (x === 0 ? 0 : 4) - (x2 === COLS - 1 ? 0 : 4), h);
+        x = x2 + 1;
+      }
+    }
+    // the same for the leftmost / rightmost columns (side pillars)
+    for (const [col, x0] of [[0, -800], [COLS - 1, WORLD_W]] as const) {
+      for (let y = 0; y < ROWS; y++) if (isSolidAll(col, y)) ext.fillStyle(fillC, 1).fillRect(x0, y * TILE + (isSolidAll(col, y - 1) ? 0 : 4), 800, TILE + 1);
+    }
 
     this.statics = this.physics.add.staticGroup();
     for (const r of mergeRects(staticTiles)) {

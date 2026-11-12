@@ -53,6 +53,8 @@ export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks 
     const rec = [];
     const push = (k) => { const last = rec[rec.length - 1]; if (last && last[1] === k) last[0]++; else rec.push([1, k]); };
     let s = T.state();
+    // ticks that already ran (idle) while the level started: real-time replays prepend them
+    if (s.levelTick > 0) rec.push([s.levelTick, '']);
     const startDeaths = s.deathsLevel;
     let total = 0;
     outer: for (const [keys, until] of plan) {
@@ -80,6 +82,11 @@ export async function replay(page, level, rec, { extra = 90, render = false } = 
     const T = window.__DTTD;
     T.setManual(true);
     T.start(level);
+    // the recording starts with the idle lead-in ticks that start() already ran
+    rec = rec.slice();
+    let skip = T.state().levelTick;
+    rec = rec.map(([n, k]) => [n, k]);
+    while (skip > 0 && rec.length) { const take = Math.min(skip, rec[0][0]); rec[0][0] -= take; skip -= take; if (!rec[0][0]) rec.shift(); }
     const d0 = T.state().deathsLevel;
     let s;
     let firstDeathTick = -1, deathCause = '';
