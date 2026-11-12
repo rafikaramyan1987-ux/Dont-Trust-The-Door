@@ -260,15 +260,26 @@ const levelInfo = {};
   const cdp = await p.ctx.newCDPSession(p.page);
   const right = lay.btns.find((b) => b.key === 'right');
   const jump = lay.btns.find((b) => b.key === 'jump');
-  const x0 = await p.page.evaluate(() => window.__DTTD.state().x);
+  // Measured in game ticks, not milliseconds, so a slow machine can't make it flaky.
+  const st = () => p.page.evaluate(() => window.__DTTD.state());
+  const waitTicks = async (n, watch) => {
+    const t0 = (await st()).levelTick;
+    for (let i = 0; i < 1500; i++) {
+      const s = await st();
+      if (watch) watch(s);
+      if (s.levelTick >= t0 + n) return s;
+      await p.page.waitForTimeout(10);
+    }
+    return st();
+  };
+  const x0 = (await st()).x;
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: right.x, y: right.y, id: 1 }] });
-  await p.page.waitForTimeout(600);
-  const x1 = await p.page.evaluate(() => window.__DTTD.state().x);
-  const vx = await p.page.evaluate(() => window.__DTTD.state().vx);
+  const s1 = await waitTicks(36);
+  const x1 = s1.x, vx = s1.vx;
   // multi-touch: keep holding right, press jump with a second finger
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: right.x, y: right.y, id: 1 }, { x: jump.x, y: jump.y, id: 2 }] });
   let minY = 1e9;
-  for (let i = 0; i < 12; i++) { await p.page.waitForTimeout(25); minY = Math.min(minY, await p.page.evaluate(() => window.__DTTD.state().y)); }
+  await waitTicks(24, (s) => { minY = Math.min(minY, s.y); });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const y0 = 586;
   log(x1 > x0 + 20 && vx > 250, 'touch: holding ▶ moves the hero right', `x ${x0.toFixed(0)} → ${x1.toFixed(0)}, vx ${vx.toFixed(0)}`);
