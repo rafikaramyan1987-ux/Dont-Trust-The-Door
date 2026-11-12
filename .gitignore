@@ -152,4 +152,3 @@ vite.config.ts.timestamp-*
 dist/
 test-results/
 .tmp/
-.tmp/
