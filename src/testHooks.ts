@@ -107,6 +107,9 @@ export function installTestHooks(game: Phaser.Game): void {
       for (let i = 0; i < n; i++) s.fixedTick();
     },
     release() { Input.bot = null; },
+    kill() { scene().debugKill(); },
+    snapCamera() { scene().debugSnapCamera(); },
+    restart() { scene().restartLevel(); },
     /** Start a level; with `replay` the bot's recorded inputs drive it from tick 0.
      *  With `checkpoint` the attempt starts at the level's checkpoint flag. */
     start(level: number, replay?: [number, string][] | null, checkpoint = false) {

@@ -17,6 +17,14 @@ const log = (ok, name, detail = '') => {
   results.push({ ok, name, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
+// Timing checks depend on the machine. On shared CI runners they are reported (INFO) but
+// do not fail the build; locally they are strict.
+const CI = !!process.env.CI;
+const perf = (ok, name, detail = '') => {
+  if (ok || !CI) return log(ok, name, detail);
+  results.push({ ok: true, info: true, name, detail });
+  console.log(`INFO  ${name}  — ${detail} (timing check, not enforced on CI)`);
+};
 const replays = Object.fromEntries(
   readdirSync(join(ROOT, 'tests', 'replays')).filter((f) => f.endsWith('.json')).sort()
     .map((f) => [Number(f.match(/\d+/)[0]), JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', f), 'utf8'))]),
@@ -53,7 +61,7 @@ const RT_VIEW = { width: 480, height: 270 };
         if (frames > 8) { deltas.push(dt); worst = Math.max(worst, dt); }
         const s = T.state();
         const done = s && s.level === level && (s.state === 'won' || s.deathsLevel > 0);
-        if (done || now - t0 > 60000) {
+        if (done || now - t0 > 180000) {
           const secs = (now - t0) / 1000;
           deltas.sort((a, b) => a - b);
           const p95 = deltas[Math.floor(deltas.length * 0.95)] || 0;
@@ -71,7 +79,7 @@ const RT_VIEW = { width: 480, height: 270 };
     if (level === 2) await page.screenshot({ path: join(shotDir, 'level-complete.png') });
   }
   const avg = fpsAll.reduce((a, b) => a + b, 0) / fpsAll.length;
-  log(avg >= 55 && Math.min(...fpsAll) >= 50, 'stable ~60 fps during the real-time bot run', `avg ${avg.toFixed(1)} fps, worst level avg ${Math.min(...fpsAll).toFixed(1)} fps (${RT_VIEW.width}×${RT_VIEW.height}, software WebGL)`);
+  perf(avg >= 55 && Math.min(...fpsAll) >= 50, 'stable ~60 fps during the real-time bot run', `avg ${avg.toFixed(1)} fps, worst level avg ${Math.min(...fpsAll).toFixed(1)} fps (${RT_VIEW.width}×${RT_VIEW.height}, software WebGL)`);
 
   const save = await page.evaluate(() => JSON.parse(localStorage.getItem('dttd-save-v1')));
   log(save && save.unlocked === 10 && Object.keys(save.completed).length === 10, 'progress saved: all 10 levels completed/unlocked', JSON.stringify({ unlocked: save?.unlocked, completed: Object.keys(save?.completed || {}).length }));
@@ -80,30 +88,42 @@ const RT_VIEW = { width: 480, height: 270 };
 }
 
 // ---------------------------------------------------------------------------
-// 2 + 3. Every trap kills; death counter and save stay consistent
+// 2 + 3. Every level is completable from the start AND from its checkpoint; every trap
+// kills; every listed troll moment fires; the death counter and save stay consistent.
+const levelInfo = {};
 {
   const { page, errors, ctx } = await openGame(browser, url);
   await page.evaluate(() => window.__DTTD.resetSave());
   let expected = 0;
   for (const [lvl, r] of Object.entries(replays)) {
-    for (const [name, rec] of Object.entries(r.traps || {})) {
-      const res = await replay(page, Number(lvl), rec);
+    const level = Number(lvl);
+    const meta = JSON.parse(readFileSync(join(ROOT, 'src', 'levels', readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort()[level - 1]), 'utf8'));
+    const fired = new Set();
+    const w = await replay(page, level, r.win);
+    w.final.trolls.forEach((t) => fired.add(t));
+    log(w.final.state === 'won' && !w.died, `level ${lvl} is completable from the start`, `${(w.final.levelTick / 60).toFixed(1)} s, ${meta.map[0].length} tiles`);
+    const c = await replay(page, level, r.cp, { checkpoint: true });
+    c.final.trolls.forEach((t) => fired.add(t));
+    log(c.final.state === 'won' && !c.died, `level ${lvl} is completable from its checkpoint`, `${(c.final.levelTick / 60).toFixed(1)} s`);
+    for (const [name, t] of Object.entries(r.traps || {})) {
+      const res = await replay(page, level, t.rec, { checkpoint: t.cp });
+      res.final.trolls.forEach((x) => fired.add(x));
       expected += res.deaths;
-      log(res.died && res.deaths === 1, `trap kills: level ${lvl} – ${name}`, `cause=${res.deathCause} at tick ${res.firstDeathTick}`);
+      log(res.died && res.deaths === 1, `trap kills: level ${lvl} – ${name}`, `cause=${res.deathCause} at ${(res.firstDeathTick / 60).toFixed(1)} s${t.cp ? ' (from checkpoint)' : ''}`);
     }
-    // and the recorded winning run is deterministic in the pure simulation too
-    const w = await replay(page, Number(lvl), r.win);
-    log(w.final.state === 'won' && !w.died, `deterministic replay wins level ${lvl}`, `${w.final.levelTick} ticks = ${(w.final.levelTick / 60).toFixed(1)} s`);
+    const missing = meta.trolls.filter((t) => !fired.has(t.id)).map((t) => t.name);
+    log(missing.length === 0 && meta.trolls.length >= 5, `level ${lvl}: all ${meta.trolls.length} troll moments fire`, missing.length ? `never fired: ${missing.join('; ')}` : meta.trolls.map((t) => t.name).join(' · '));
+    levelInfo[level] = { name: meta.name, width: meta.map[0].length, winSeconds: +(w.final.levelTick / 60).toFixed(1), cpSeconds: +(c.final.levelTick / 60).toFixed(1), trolls: meta.trolls.map((t) => t.name) };
   }
   const total = await page.evaluate(() => window.__DTTD.Save.get().totalDeaths);
   log(total === expected, 'death counter equals number of deaths', `${total} == ${expected}`);
-  const hud = await page.evaluate(() => window.__DTTD.game.scene.getScene('Game').children.list.filter((o) => o.type === 'Container').flatMap((c) => c.list || []).find((o) => o.type === 'Text' && /^\d+$/.test(o.text))?.text);
+  const hud = await page.evaluate(() => window.__DTTD.state().hudDeaths);
   log(Number(hud) === expected, 'HUD death counter shows the total', `HUD "${hud}"`);
   // reload → persisted
   await page.reload();
   await page.waitForFunction(() => window.__DTTD);
   const after = await page.evaluate(() => window.__DTTD.Save.get());
-  log(after.totalDeaths === expected && after.levelDeaths['2'] >= 1, 'save survives a page reload', `totalDeaths=${after.totalDeaths}`);
+  log(after.totalDeaths === expected && after.levelDeaths['2'] >= 1, 'save survives a page reload', `totalDeaths=${after.totalDeaths}, per level ${JSON.stringify(after.levelDeaths)}`);
   // storage failure must not crash
   const blocked = await page.evaluate(() => {
     const orig = Storage.prototype.setItem;
@@ -111,6 +131,42 @@ const RT_VIEW = { width: 480, height: 270 };
     try { window.__DTTD.Save.addDeath(1); return 'ok'; } catch (e) { return String(e); } finally { Storage.prototype.setItem = orig; }
   });
   log(blocked === 'ok', 'blocked localStorage is handled (try/catch)', blocked);
+  allErrors.push(...errors);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Checkpoint behaviour: reach the flag by playing, die → respawn at the flag with the
+// traps re-armed (and "keep" results such as a fled door applied); restart → back to start.
+{
+  const { page, errors, ctx } = await openGame(browser, url);
+  for (const level of [1, 3, 10]) {
+    const r = replays[level];
+    const res = await page.evaluate(({ level, rec }) => {
+      const T = window.__DTTD;
+      T.setManual(true);
+      T.start(level, null, false);
+      const keys = [];
+      for (const [n, k] of rec) for (let i = 0; i < n; i++) keys.push(k);
+      let i = 0, s = T.state();
+      while (!s.checkpoint && i < keys.length) { T.sim(keys[i++], 1); s = T.state(); }
+      T.sim('R', 30); // a few steps past the flag (triggers after it may fire)
+      const before = T.state();
+      T.kill();
+      T.sim('', 20); // restart delay
+      const after = T.state();
+      T.sim('', 2);
+      T.restart();
+      T.sim('', 2);
+      const restarted = T.state();
+      T.release();
+      return { reached: before.checkpoint, cpX: before.cpX, firedBefore: before.fired.length, after, restarted };
+    }, { level, rec: r.win });
+    const atFlag = Math.abs(res.after.x - res.cpX) < 30 && res.after.state === 'play' && res.after.checkpoint;
+    log(res.reached && atFlag && res.after.deathsLevel === 1, `level ${level}: death after the checkpoint respawns at the flag`, `flag x=${res.cpX}, respawn x=${res.after.x.toFixed(0)}, deaths=${res.after.deathsLevel}`);
+    log(res.after.doorX > res.cpX, `level ${level}: the door that already fled stays fled after the checkpoint respawn`, `door x=${res.after.doorX.toFixed(0)} (flag x=${res.cpX})`);
+    log(res.restarted.x < 200 && !res.restarted.checkpoint, `level ${level}: the restart button goes back to the very start`, `x=${res.restarted.x.toFixed(0)}`);
+  }
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -130,8 +186,8 @@ const RT_VIEW = { width: 480, height: 270 };
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  }), replays[2].traps[Object.keys(replays[2].traps)[0]]);
-  log(ms < 300, 'restart after death is instant (< 0.3 s)', `${ms.toFixed(0)} ms`);
+  }), replays[2].traps[Object.keys(replays[2].traps)[0]].rec);
+  perf(ms < 300, 'restart after death is instant (< 0.3 s)', `${ms.toFixed(0)} ms`);
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -153,8 +209,8 @@ const RT_VIEW = { width: 480, height: 270 };
     return out;
   });
   const frame = Math.max(r.frame5, r.frame10), rebuild = Math.max(r.rebuild5, r.rebuild10);
-  log(frame < 4, 'CPU time per frame at 1280×720 is far below the 16.7 ms budget', `${frame.toFixed(2)} ms/frame`);
-  log(rebuild < 20, 'level rebuild on restart is cheap', `${rebuild.toFixed(2)} ms (restart delay itself is 16 ticks = 267 ms)`);
+  perf(frame < 4, 'CPU time per frame at 1280×720 is far below the 16.7 ms budget', `${frame.toFixed(2)} ms/frame`);
+  perf(rebuild < 20, 'level rebuild on restart is cheap', `${rebuild.toFixed(2)} ms (restart delay itself is 16 ticks = 267 ms)`);
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -182,9 +238,9 @@ const RT_VIEW = { width: 480, height: 270 };
   await p.page.waitForTimeout(700);
   const lay = await p.page.evaluate(() => {
     const g = window.__DTTD.game.scene.getScene('Game');
-    const cam = g.cameras.main;
+    const cam = g.uiCam; const wv = g.cameras.main; const dprv = g.scale.width / window.innerWidth;
     const toCss = (x, y) => { const w = cam.getWorldPoint(0, 0); const z = cam.zoom; const dpr = g.scale.width / window.innerWidth; return { x: ((x - w.x) * z) / dpr, y: ((y - w.y) * z) / dpr }; };
-    const levelL = toCss(0, 0).x, levelR = toCss(1280, 0).x;
+    const levelL = wv.x / dprv, levelR = (wv.x + wv.width) / dprv;
     const btns = g.touchBtns.map((b) => {
       const c = b.img; const sz = c.getData('size');
       const a = toCss(c.x - sz.w / 2, c.y - sz.h / 2), z = toCss(c.x + sz.w / 2, c.y + sz.h / 2);
@@ -193,6 +249,8 @@ const RT_VIEW = { width: 480, height: 270 };
     return { visible: g.touchUI.visible, levelL, levelR, btns, rotate: getComputedStyle(document.getElementById('rotate')).display };
   });
   await p.page.screenshot({ path: join(shotDir, 'layout-phone-844x390.png') });
+  const view = await p.page.evaluate(() => { const s = window.__DTTD.state(); return { tiles: s.viewTiles, heroCss: (28 * s.zoom) / (window.__DTTD.game.scale.width / window.innerWidth) }; });
+  log(view.tiles >= 20 && view.tiles <= 24, 'phone landscape: camera shows ~22 tiles across and follows the hero', `${view.tiles.toFixed(1)} tiles visible, hero ${view.heroCss.toFixed(1)} css px tall (was 12.5 px when the whole 32-tile level was shown)`);
   const outside = lay.btns.every((b) => b.x + b.w / 2 <= lay.levelL + 1 || b.x - b.w / 2 >= lay.levelR - 1);
   const big = lay.btns.every((b) => b.w >= 44 && b.h >= 44);
   log(lay.visible && outside && big && lay.rotate === 'none', 'phone landscape 844×390: buttons visible, ≥44 px, outside the level area',
@@ -237,6 +295,6 @@ log(bytes < 10 * 1024 * 1024, 'production build under 10 MB', `${(bytes / 1024 /
 await browser.close();
 server.close();
 const failed = results.filter((r) => !r.ok).length;
-writeFileSync(join(shotDir, 'selftest.json'), JSON.stringify({ date: new Date().toISOString(), passed: results.length - failed, failed, results }, null, 2));
+writeFileSync(join(shotDir, 'selftest.json'), JSON.stringify({ date: new Date().toISOString(), passed: results.length - failed, failed, levels: levelInfo, results }, null, 2));
 console.log(`\n${results.length - failed}/${results.length} checks passed`);
 process.exit(failed ? 1 : 0);

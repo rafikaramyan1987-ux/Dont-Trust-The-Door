@@ -811,5 +811,31 @@ export function generateTextures(scene: Phaser.Scene): void {
     add(scene, `dots-${i}`, c);
   });
 
+  // parallax scenery per palette: distant hills (tileable) and clouds (tileable)
+  PALETTES.forEach((p, i) => {
+    [c, ctx] = canvas(640, 260);
+    const hill = (x: number, w: number, h: number, col: string) => {
+      ctx.beginPath();
+      ctx.moveTo(x - w / 2, 260);
+      ctx.bezierCurveTo(x - w / 2, 260 - h, x - w * 0.2, 260 - h * 1.05, x, 260 - h);
+      ctx.bezierCurveTo(x + w * 0.2, 260 - h * 1.05, x + w / 2, 260 - h, x + w / 2, 260);
+      ctx.closePath();
+      ctx.fillStyle = col;
+      ctx.fill();
+    };
+    for (const off of [-640, 0, 640]) {
+      hill(off + 90, 300, 150, p.dot.replace(/[\d.]+\)$/, '0.10)'));
+      hill(off + 330, 380, 200, p.dot.replace(/[\d.]+\)$/, '0.08)'));
+      hill(off + 540, 260, 120, p.dot.replace(/[\d.]+\)$/, '0.10)'));
+    }
+    add(scene, `hills-${i}`, c);
+  });
+  [c, ctx] = canvas(720, 300);
+  const cloud = (x: number, y: number, k: number) => {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    for (const [dx, dy, r] of [[0, 0, 26], [28, -12, 32], [60, 0, 24], [30, 8, 26]]) { ellipse(ctx, x + dx * k, y + dy * k, r * k, r * k * 0.8); ctx.fill(); }
+  };
+  for (const off of [-720, 0, 720]) { cloud(off + 80, 70, 1.2); cloud(off + 330, 150, 0.9); cloud(off + 560, 50, 1.4); cloud(off + 470, 230, 0.7); }
+  add(scene, 'clouds', c);
   // speech bubble is drawn with Graphics at runtime; title logo letters use text.
 }

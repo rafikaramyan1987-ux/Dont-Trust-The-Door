@@ -501,3 +501,46 @@ export function pulse(b) {
   const X = b.px(0);
   return { w: 12, win: [run(X + 2 * T - 12), ['', 60], run(X + 11 * T)], traps: { [name]: [run(X + 11 * T), ['R', 60]] } };
 }
+
+/** TROLL: a low tunnel whose ceiling hides spikes – only small hops get across its pits. */
+export function tunnel(b) {
+  b.ground(0, 17);
+  b.fill(2, 15, 9, 10, '#');
+  b.fill(5, 6, 15, 16, '.'); b.fill(5, 6, 16, 16, '^');
+  b.fill(10, 11, 15, 16, '.'); b.fill(10, 11, 16, 16, '^');
+  const g = b.group({ tile: 'v', hidden: true });
+  b.fill(3, 13, 11, 11, g);
+  const name = 'The low tunnel ceiling hides spikes';
+  b.trigger({ when: { zone: b.rect(3, 11, 11, 2) }, do: [{ pop: g }], troll: b.troll(name) });
+  b.hint(8, 7, 'small hops only', 1);
+  const X = b.px(0);
+  return {
+    w: 18,
+    win: [run(X + 5 * T - 30), ['RJ', 6], land, run(X + 10 * T - 30), ['RJ', 6], land, run(X + 17 * T)],
+    traps: { [name]: [run(X + 5 * T - 30), J(), ['R', 60]] },
+  };
+}
+
+/** Climb a tower to a high walkway; part of it collapses (TROLL) – jump the cracked bit. */
+export function tower(b) {
+  b.ground(0, 26);
+  b.fill(2, 4, 13, 14, '#');
+  b.fill(5, 7, 11, 14, '#');
+  b.fill(8, 10, 9, 14, '#');
+  b.fill(11, 15, 7, 7, '#');
+  b.fill(19, 22, 7, 7, '#');
+  const g = b.group({ tile: '#', look: 'cracked' });
+  b.fill(16, 18, 7, 7, g);
+  b.fill(11, 22, 14, 14, '^');
+  b.put(13, 5, 'o'); b.put(20, 5, 'o');
+  const name = 'The high walkway collapses';
+  b.trigger({ when: { touch: g }, do: [{ fall: g, shake: 4 }], troll: b.troll(name) });
+  b.hint(17, 4, 'jump the cracks', 1);
+  const X = b.px(0);
+  const climb = [run(X + 2 * T - 40), J(), land, run(X + 5 * T - 50), J(), land, run(X + 8 * T - 50), J(), land, run(X + 11 * T - 50), J(), land];
+  return {
+    w: 27,
+    win: [...climb, run(X + 16 * T - 45), J(), land, run(X + 22 * T + 30), ['R', 's.grounded && s.y>500'], run(X + 26 * T)],
+    traps: { [name]: [...climb, ['R', 90]] },
+  };
+}

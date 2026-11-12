@@ -75,6 +75,10 @@ export interface Snapshot {
   checkpoint: boolean;
   worldW: number;
   controlsFlipped: boolean;
+  hudDeaths: string;
+  cpX: number;
+  zoom: number;
+  viewTiles: number;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -152,6 +156,8 @@ export class GameScene extends Phaser.Scene {
   // presentation
   private bg!: Phaser.GameObjects.Image;
   private dots!: Phaser.GameObjects.TileSprite;
+  private hills!: Phaser.GameObjects.TileSprite;
+  private clouds!: Phaser.GameObjects.TileSprite;
   private hud!: Phaser.GameObjects.Container;
   private deathText!: Phaser.GameObjects.Text;
   private deathIcon!: Phaser.GameObjects.Image;
@@ -226,7 +232,10 @@ export class GameScene extends Phaser.Scene {
     this.bg = this.add.image(0, 0, `bg-${this.lvl.world % PALETTES.length}`).setScrollFactor(0).setDepth(-20);
     this.dots = this.add.tileSprite(0, 0, 64, 64, `dots-${this.lvl.world % PALETTES.length}`).setScrollFactor(0).setDepth(-19);
     this.dots.setTileScale(1 / RES);
-    this.worldLayer.add([this.bg, this.dots]);
+    const wi = this.lvl.world % PALETTES.length;
+    this.clouds = this.add.tileSprite(0, 0, 64, 64, 'clouds').setScrollFactor(0).setDepth(-18).setTileScale(1 / RES);
+    this.hills = this.add.tileSprite(0, 0, 64, 64, `hills-${wi}`).setScrollFactor(0).setDepth(-17).setTileScale(1 / RES);
+    this.worldLayer.add([this.bg, this.dots, this.clouds, this.hills]);
 
     this.makeEmitters();
     this.buildHud();
@@ -307,6 +316,9 @@ export class GameScene extends Phaser.Scene {
     const pad = 200;
     this.bg.setPosition(vw / 2, H / 2).setDisplaySize(vw / zoom + pad, H / zoom + pad);
     this.dots.setPosition(vw / 2, H / 2).setSize(vw / zoom + pad, H / zoom + pad);
+    // scenery: clouds across the top, hills along the bottom (parallax in applyCamera)
+    this.clouds.setOrigin(0.5, 0).setPosition(vw / 2, H / 2 - H / zoom / 2 + 10).setSize(vw / zoom + pad, 300);
+    this.hills.setOrigin(0.5, 1).setPosition(vw / 2, H / 2 + H / zoom / 2).setSize(vw / zoom + pad, 260);
     if (this.pbody) this.snapCamera();
   }
 
@@ -324,6 +336,8 @@ export class GameScene extends Phaser.Scene {
     cam.centerOn(this.camX, this.camY);
     this.dots.tilePositionX = cam.scrollX * 0.35 * RES;
     this.dots.tilePositionY = cam.scrollY * 0.35 * RES;
+    this.clouds.tilePositionX = cam.scrollX * 0.12 * RES + this.time.now * 0.004 * RES;
+    this.hills.tilePositionX = cam.scrollX * 0.25 * RES;
   }
 
   private fitDim(): void {
@@ -1459,6 +1473,16 @@ export class GameScene extends Phaser.Scene {
   // -------------------------------------------------------------------------
   // Test hooks
 
+  /** Test hook: put the camera on the hero immediately (after a fast-forward). */
+  debugSnapCamera(): void {
+    this.snapCamera();
+  }
+
+  /** Test hook: kill the hero right now (used to check checkpoint respawns). */
+  debugKill(): void {
+    this.kill('test');
+  }
+
   snapshot(): Snapshot {
     const b = this.pbody;
     return {
@@ -1467,6 +1491,8 @@ export class GameScene extends Phaser.Scene {
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
       trolls: [...this.trollsFired], checkpoint: this.cpActive, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
+      hudDeaths: this.deathText.text, cpX: this.cp ? this.cp.x : -1, zoom: this.cameras.main.zoom,
+      viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE,
     };
   }
 }
