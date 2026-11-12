@@ -66,6 +66,13 @@ export function installTestHooks(game: Phaser.Game): void {
     }
   };
 
+  // Tweens normally measure wall-clock time (Date.now). While the harness steps the game
+  // manually, make them follow the stepped clock so captures are deterministic.
+  const TM = Phaser.Tweens.TweenManager.prototype as unknown as { getDelta: (tick: boolean) => number };
+  const origDelta = TM.getDelta;
+  TM.getDelta = function (this: unknown, tick: boolean) {
+    return manual ? FRAME : origDelta.call(this, tick);
+  };
   game.scene.add('Showcase', ShowcaseScene, false);
   const api = {
     showcase() {

@@ -21,16 +21,29 @@ const pick = (l, which) => (which === 'win' ? R(l).win : R(l).traps[which] ?? Ob
 const { server, url } = await serveDist();
 const browser = await launch();
 
-/** Start a level driven by a replay and advance (rendering) until `until` holds, plus `extra` frames. */
-async function advance(page, until, extra = 0, maxFrames = 1500) {
-  return page.evaluate(({ until, extra, maxFrames }) => {
+/**
+ * Advance the current level (already started with a replay) until `until` holds, then
+ * `extra` more rendered frames. The simulation is deterministic, so we first find the
+ * target tick with the fast non-rendering sim, then restart and only render the last
+ * `warm` ticks (enough for tweens, particles and slow-motion to look right).
+ */
+async function advance(page, lvl, rec, until, extra = 0, warm = 30) {
+  return page.evaluate(({ lvl, rec, until, extra, warm }) => {
     const T = window.__DTTD;
     const f = new Function('s', `return (${until});`);
+    const sc = () => T.game.scene.getScene('Game');
+    T.start(lvl, rec);
     let n = 0;
-    while (!f(T.state()) && n < maxFrames) { T.step(1); n++; }
+    while (!f(T.state()) && n++ < 3000) sc().fixedTick();
+    const target = T.state().tick;
+    T.start(lvl, rec);
+    T.step(12); // render the spawn pop-in
+    while (T.state().tick < target - warm) sc().fixedTick();
+    n = 0;
+    while (!f(T.state()) && n++ < 600) T.step(1);
     T.step(extra);
     return T.state();
-  }, { until, extra, maxFrames });
+  }, { lvl, rec, until, extra, warm });
 }
 
 // ---------------------------------------------------------------------------
@@ -50,27 +63,30 @@ if (!args.has('--video-only')) {
   await page.screenshot({ path: join(SHOTS, '00-level-select.png') });
 
   const moments = [
-    [1, 'win', 's.x>=1080 && s.grounded', 14, 'the last block sinks — "oops!"'],
-    [2, 0, 's.y>=612', 0, 'the floor lied'],
+    [1, 'win', 's.y>=622 && s.grounded', 12, 'the last block sinks — "oops!"'],
+    [2, 0, 's.y>=625', 0, 'the floor lied'],
     [3, 'win', 's.doorX>=1110', 0, 'the EXIT grows legs and runs'],
     [4, 0, 's.state==="dead"', 3, 'spikes pop exactly where you land'],
     [5, 0, 's.state==="dead"', 2, 'the heavy ceiling'],
     [6, 0, 's.y<=330', 0, 'boing… straight into the spikes'],
     [7, 0, 's.state==="dead"', 5, 'the fake EXIT bites'],
-    [8, 0, 's.gravity<0', 16, 'gravity flips mid-jump'],
+    [8, 0, 's.gravity<0', 45, 'gravity flips mid-jump'],
     [9, 0, 's.state==="dead"', 3, 'that coin had teeth'],
     [10, 'win', 's.doorX>=1080', 0, 'everything chases you'],
   ];
-  await page.evaluate(() => window.__DTTD.setManual(true));
-  for (const [lvl, which, until, extra, caption] of moments) {
-    await page.evaluate(({ lvl, rec }) => window.__DTTD.start(lvl, rec), { lvl, rec: pick(lvl, which) });
-    await advance(page, until, extra);
-    const file = `level-${String(lvl).padStart(2, '0')}.png`;
-    await page.screenshot({ path: join(SHOTS, file) });
-    console.log(`screens/${file}  ${caption}`);
-  }
   if (errors.length) console.log('console errors:', errors);
   await ctx.close();
+  // level moments at the game's native 1280×720
+  const lv = await openGame(browser, url);
+  await lv.page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.setManual(true); });
+  for (const [lvl, which, until, extra, caption] of moments) {
+    await advance(lv.page, lvl, pick(lvl, which), until, extra, 16);
+    const file = `level-${String(lvl).padStart(2, '0')}.png`;
+    await lv.page.screenshot({ path: join(SHOTS, file), timeout: 180000 });
+    console.log(`screens/${file}  ${caption}`);
+  }
+  if (lv.errors.length) console.log('console errors:', lv.errors);
+  await lv.ctx.close();
 }
 
 // ---------------------------------------------------------------------------
@@ -79,16 +95,16 @@ if (!args.has('--screens-only')) {
   const FPS = 30;
   const W = 1080, H = 1920, GAME = 1080; // square crop of a 1920×1080 render
   const clips = [
-    { lvl: 3, rec: 'win', from: 's.x>=716', dur: 2.6, cap: 'The EXIT door…|…has LEGS?!' },
-    { lvl: 2, rec: 0, from: 's.x>=360', dur: 1.8, cap: 'The floor lied.' },
-    { lvl: 4, rec: 0, from: 's.x>=215', dur: 1.8, cap: 'Spikes pop where you land' },
-    { lvl: 6, rec: 0, from: 's.x>=330', dur: 1.8, cap: 'Jump pad = bad idea' },
-    { lvl: 7, rec: 0, from: 's.x>=930', dur: 1.6, cap: 'Wrong door.' },
-    { lvl: 8, rec: 0, from: 's.x>=470', dur: 2.0, cap: 'Gravity? Optional.' },
-    { lvl: 9, rec: 0, from: 's.x>=225', dur: 1.4, cap: 'Greedy?' },
-    { lvl: 10, rec: 'win', from: 's.levelTick>=8', dur: 4.0, cap: 'FINALE: everything lies' },
+    { lvl: 3, rec: 'win', from: 's.x>=752', dur: 2.4, cap: 'The EXIT door…|…has LEGS?!' },
+    { lvl: 2, rec: 0, from: 's.x>=370', dur: 1.7, cap: 'The floor lied.' },
+    { lvl: 4, rec: 0, from: 's.x>=225', dur: 1.7, cap: 'Spikes pop where you land' },
+    { lvl: 6, rec: 0, from: 's.x>=340', dur: 1.7, cap: 'Jump pad = bad idea' },
+    { lvl: 7, rec: 0, from: 's.x>=940', dur: 1.5, cap: 'Wrong door.' },
+    { lvl: 8, rec: 0, from: 's.x>=480', dur: 1.9, cap: 'Gravity? Optional.' },
+    { lvl: 9, rec: 0, from: 's.x>=232', dur: 1.3, cap: 'Greedy?' },
+    { lvl: 10, rec: 'win', from: 's.levelTick>=8', dur: 4.7, cap: 'FINALE: everything lies' },
   ];
-  const END = 3.0; // end card (last 0.5 s cross-fades back to frame 0 for a seamless loop)
+  const END = 3.1; // end card (last 0.5 s cross-fades back to frame 0 for a seamless loop)
 
   const { page, errors, ctx } = await openGame(browser, url, { viewport: { width: 1920, height: 1080 } });
   await page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.setManual(true); });
@@ -98,8 +114,7 @@ if (!args.has('--screens-only')) {
   let camX = null;
   for (let ci = 0; ci < clips.length; ci++) {
     const c = clips[ci];
-    await page.evaluate(({ lvl, rec }) => window.__DTTD.start(lvl, rec), { lvl: c.lvl, rec: pick(c.lvl, c.rec) });
-    await advance(page, c.from, 0);
+    await advance(page, c.lvl, pick(c.lvl, c.rec), c.from, 0);
     const startStep = await page.evaluate(() => window.__DTTD.frame());
     const t0 = vf / FPS;
     camX = null;
@@ -110,7 +125,7 @@ if (!args.has('--screens-only')) {
       const focus = c.lvl === 3 || c.lvl === 10 ? (s.x + s.doorX) / 2 : s.x;
       const want = Math.max(0, Math.min(1920 - GAME, focus * 1.5 - GAME / 2));
       camX = camX === null ? want : camX + (want - camX) * 0.18;
-      await page.screenshot({ path: join(TMP, 'frames', `g${String(vf).padStart(4, '0')}.png`), clip: { x: Math.round(camX), y: 0, width: GAME, height: GAME } });
+      await page.screenshot({ timeout: 180000, path: join(TMP, 'frames', `g${String(vf).padStart(4, '0')}.png`), clip: { x: Math.round(camX), y: 0, width: GAME, height: GAME } });
       meta.push(ci);
       vf++;
     }
@@ -121,7 +136,6 @@ if (!args.has('--screens-only')) {
     }
     console.log(`clip ${ci + 1}/${clips.length}: level ${c.lvl} (${n} frames)`);
   }
-  const totalDeaths = await page.evaluate(() => window.__DTTD.Save.get().totalDeaths);
 
   // Soundtrack: the in-game music loop + every sound effect at its moment, rendered offline.
   const endT = vf / FPS;
@@ -141,7 +155,7 @@ if (!args.has('--screens-only')) {
     await shot(`<div class="t" style="top:1560px;font-size:78px;color:#ffd23f">${parts[0]}</div>${parts[1] ? `<div class="t" style="top:1665px;font-size:92px;color:#ff6f91">${parts[1]}</div>` : ''}`, `cap${i}.png`);
   }
   await shot(`<div class="t" style="top:520px;font-size:120px;line-height:1.1">How many<br>tries would<br><span style="color:#ffd23f;font-size:150px">YOU</span><br>need?</div>
-    <div class="t" style="top:1350px;font-size:60px;color:#9ad9ff;-webkit-text-stroke:12px #2b2d42">I needed ${totalDeaths}+ 💀</div>`, 'end.png');
+    <div class="t" style="top:1350px;font-size:60px;color:#9ad9ff;-webkit-text-stroke:12px #2b2d42">Play free in your browser</div>`, 'end.png');
   await ov.close();
   writeFileSync(join(TMP, 'compose.json'), JSON.stringify({ W, H, GAME, FPS, frames: vf, meta, clips: clips.map((c) => ({ cap: c.cap, lvl: c.lvl })), end: END, capStart: clips.map((_, i) => meta.indexOf(i)) }));
   if (errors.length) console.log('console errors:', errors);
@@ -151,7 +165,7 @@ if (!args.has('--screens-only')) {
   const mp4 = join(OUT, 'trailer-9x16.mp4');
   execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-framerate', String(FPS), '-i', join(TMP, 'out', 'f%04d.jpg'), '-i', join(TMP, 'audio.wav'),
     '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart',
-    '-c:a', 'aac', '-b:a', '160k', '-shortest', mp4], { stdio: 'inherit' });
+    '-af', 'loudnorm=I=-15:TP=-1.5:LRA=11', '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-shortest', mp4], { stdio: 'inherit' });
   console.log(`wrote ${mp4}`);
   const probe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,duration', '-of', 'compact', mp4]).toString();
   console.log(probe.trim());

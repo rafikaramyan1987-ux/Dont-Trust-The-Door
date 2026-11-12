@@ -10,12 +10,15 @@ const OUT = '#2b2d42';
 
 type C2D = CanvasRenderingContext2D;
 
-function canvas(w: number, h: number): [HTMLCanvasElement, C2D] {
+/** Resolution for the hero's textures (small, often shown big, so extra crisp). */
+export const HERO_RES = 4;
+
+function canvas(w: number, h: number, res = RES): [HTMLCanvasElement, C2D] {
   const c = document.createElement('canvas');
-  c.width = Math.ceil(w * RES);
-  c.height = Math.ceil(h * RES);
+  c.width = Math.ceil(w * res);
+  c.height = Math.ceil(h * res);
   const ctx = c.getContext('2d')!;
-  ctx.scale(RES, RES);
+  ctx.scale(res, res);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   return [c, ctx];
@@ -684,12 +687,12 @@ function shade(hex: string, amt: number): string {
 export function generateTextures(scene: Phaser.Scene): void {
   let c: HTMLCanvasElement, ctx: C2D;
 
-  [c, ctx] = canvas(HERO_W, HERO_H); drawHeroBody(ctx); add(scene, 'hero-body', c);
+  [c, ctx] = canvas(HERO_W, HERO_H, HERO_RES); drawHeroBody(ctx); add(scene, 'hero-body', c);
   for (const e of ['happy', 'focus', 'shock', 'dead', 'blink'] as Expr[]) {
-    [c, ctx] = canvas(HERO_W, HERO_H); drawFace(ctx, e); add(scene, `face-${e}`, c);
+    [c, ctx] = canvas(HERO_W, HERO_H, HERO_RES); drawFace(ctx, e); add(scene, `face-${e}`, c);
   }
-  [c, ctx] = canvas(14, 10); drawFoot(ctx); add(scene, 'hero-foot', c);
-  [c, ctx] = canvas(24, 20); drawLeaf(ctx); add(scene, 'hero-leaf', c);
+  [c, ctx] = canvas(14, 10, HERO_RES); drawFoot(ctx); add(scene, 'hero-foot', c);
+  [c, ctx] = canvas(24, 20, HERO_RES); drawLeaf(ctx); add(scene, 'hero-leaf', c);
 
   for (const f of ['idle', 'hehe', 'wink', 'run', 'tired', 'chomp'] as DoorFace[]) {
     [c, ctx] = canvas(DOOR_W, DOOR_H); drawDoor(ctx, f); add(scene, `door-${f}`, c);

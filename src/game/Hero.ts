@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { RES } from '../art';
+import { HERO_RES } from '../art';
 
 export type Expression = 'happy' | 'focus' | 'shock' | 'dead';
 
@@ -30,7 +30,7 @@ export class Hero extends Phaser.GameObjects.Container {
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
-    const s = 1 / RES;
+    const s = 1 / HERO_RES;
     this.rig = scene.add.container(0, 0);
     this.footL = scene.add.image(-8, -4, 'hero-foot').setScale(s);
     this.footR = scene.add.image(8, -4, 'hero-foot').setScale(s);

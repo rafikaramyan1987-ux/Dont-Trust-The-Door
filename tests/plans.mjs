@@ -6,7 +6,7 @@ const J = (n = 16) => ['RJ', n];
 const land = ['R', 's.grounded'];
 export const PLANS = {
   1: {
-    win: [['R', 's.x>=228'], J(14), land, ['R', 's.x>=345'], J(), land, ['R', 's.x>=545'], J(), land, ['R', 's.x>=880'], J(), land, ['R', 's.x>=1070'], ['', 40], J(), ['R', 's.state!=="play"']],
+    win: [['R', 's.x>=228'], J(14), land, ['R', 's.x>=345'], J(), land, ['R', 's.x>=545'], J(), land, ['R', 's.x>=880'], J(), land, ['R', 's.x>=1100'], ['', 's.grounded && s.y>=620'], ['', 30], J(), ['R', 's.state!=="play"']],
     traps: { 'the gap (tutorial)': [['R', 's.x>=228'], J(14), land, ['R', 's.x>=345'], J(), land, ['R', 's.x>=545'], J(), land, ['R', 300]] },
   },
   2: {
