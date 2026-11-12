@@ -469,3 +469,35 @@ export function endHidden(b) {
   const X = b.px(0);
   return { w: 12, win: [run(X + 4 * T - 45), J(), ['R', 's.state!=="play"']], traps: { 'A fake EXIT in front of the real one': [run(X + 5 * T), ['R', 60]] } };
 }
+
+/** TROLL: a bridge over spikes crumbles a moment after you step on each piece – don't stop. */
+export function bridge(b) {
+  b.ground(0, 1);
+  b.ground(14, 15);
+  b.fill(2, 13, 17, 17, '#');
+  b.fill(2, 13, 16, 16, '^');
+  const name = 'The bridge crumbles under you';
+  const id = b.troll(name);
+  for (let x = 2; x <= 12; x += 2) {
+    const g = b.group({ tile: '#', look: 'cracked' });
+    b.fill(x, x + 1, 15, 15, g);
+    b.trigger({ when: { touch: g }, do: [{ fall: g, shake: 16 }], troll: id });
+  }
+  b.hint(7, 11, "don't stop!", 1);
+  const X = b.px(0);
+  return { w: 16, win: [run(X + 15 * T)], traps: { [name]: [run(X + 5 * T), ['', 90]] } };
+}
+
+/** TROLL (timing): spikes breathe in and out of the floor – cross while they are down. */
+export function pulse(b) {
+  b.ground(0, 11);
+  const g = b.group({ tile: '^', hidden: true });
+  b.fill(4, 7, 14, 14, g);
+  const name = 'Spikes breathe in and out of the floor';
+  const pid = b.uid('pulse');
+  b.trigger({ id: pid, when: { zone: b.rect(2, 8, 1, 7) }, every: 120, do: [{ pop: g }], troll: b.troll(name) });
+  b.trigger({ when: { after: pid }, delay: 60, every: 120, do: [{ retract: g }] });
+  b.hint(5.5, 10, 'wait... now!', 1);
+  const X = b.px(0);
+  return { w: 12, win: [run(X + 2 * T - 12), ['', 60], run(X + 11 * T)], traps: { [name]: [run(X + 11 * T), ['R', 60]] } };
+}

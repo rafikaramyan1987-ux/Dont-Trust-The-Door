@@ -125,7 +125,7 @@ export class GameScene extends Phaser.Scene {
   private pads: Pad[] = [];
   private groups = new Map<string, GroupRT>();
   private triggers: TriggerRT[] = [];
-  private scheduled: { at: number; actions: Action[]; every?: number }[] = [];
+  private scheduled: { at: number; actions: Action[]; every?: number; repeat?: boolean }[] = [];
   /** World x of every death in this level (hints appear near where you keep dying). */
   private deathXs: number[] = [];
   private fired = new Set<string>();
@@ -1074,7 +1074,7 @@ export class GameScene extends Phaser.Scene {
       if (t.def.delay) this.scheduled.push({ at: this.levelTick + t.def.delay, actions: t.def.do, every: t.def.every });
       else {
         this.runActions(t.def.do);
-        if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every });
+        if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true });
       }
     }
   }
@@ -1084,8 +1084,8 @@ export class GameScene extends Phaser.Scene {
     const due = this.scheduled.filter((s) => s.at <= this.levelTick);
     this.scheduled = this.scheduled.filter((s) => s.at > this.levelTick);
     for (const s of due) {
-      this.runActions(s.actions);
-      if (s.every) this.scheduled.push({ at: s.at + s.every, actions: s.actions, every: s.every });
+      this.runActions(s.actions, !!s.repeat);
+      if (s.every) this.scheduled.push({ at: s.at + s.every, actions: s.actions, every: s.every, repeat: true });
     }
   }
 
@@ -1095,7 +1095,8 @@ export class GameScene extends Phaser.Scene {
     return g;
   }
 
-  private runActions(actions: Action[]): void {
+  /** `quiet`: a repeat of a rhythmic trap – no slow-motion / shocked face every cycle. */
+  private runActions(actions: Action[], quiet = false): void {
     let trap = false;
     for (const a of actions) {
       if ('fall' in a) {
@@ -1173,7 +1174,7 @@ export class GameScene extends Phaser.Scene {
         trap = true;
       }
     }
-    if (trap) {
+    if (trap && !quiet) {
       this.hero.flash('shock', 0.55);
       this.sfx('trap');
       if (this.slowmo < 9) { this.slowmo = 9; this.applySlowmo(); }
