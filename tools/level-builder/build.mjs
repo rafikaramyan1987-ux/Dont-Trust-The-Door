@@ -174,7 +174,7 @@ const LEVELS = [
     id: 7, slug: 'too-many-doors', name: 'Too Many Doors', idea: 'The EXIT keeps changing its mind', winMessage: 'Wrong door. Right wall.',
     deathQuips: ['NOPE!', 'That door bites.', 'Not that one!', 'Rude.'],
     segments: [S.start, S.l7FakeExit, [S.l7Runaway, (b) => ({ to: b.at('swap') + 6 })], S.l7Wall, S.checkpoint, S.l7Wall,
-      [S.l7Swap, (b) => ({ to: b.at('end') + 8 }), 'swap'], S.l7FakeExit, S.l7Wall, [S.l7HiddenEnd, {}, 'end']],
+      [S.l7Swap, (b) => ({ to: b.at('end') + 8 }), 'swap'], S.l7FakeExit, S.l7Wall, S.l7Wall, [S.l7HiddenEnd, {}, 'end']],
   },
   {
     id: 8, slug: 'screen-lies', name: 'Screen Lies', idea: 'The camera lies', winMessage: 'Seeing is NOT believing.',
@@ -190,7 +190,7 @@ const LEVELS = [
     id: 10, slug: 'grand-betrayal', name: 'The Grand Betrayal', idea: 'Moving platforms betray you', winMessage: 'You out-trolled them all!',
     deathQuips: ['Betrayed!', 'Not again...', 'Trust issues.', 'Almost!'],
     segments: [[S.start, sky], S.l10Shuttle, S.l10Shy, S.l10Blink, S.l10Elevator, S.l10Shy, [S.checkpoint, sky], S.l10Shuttle, S.l10Elevator,
-      S.l10Blink, S.l10Shuttle, [S.end, sky]],
+      S.l10Blink, S.l10Shy, S.l10Shuttle, [S.end, sky]],
   },
 ];
 

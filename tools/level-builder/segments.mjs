@@ -734,13 +734,13 @@ export function l10Blink(b) {
   const name = 'The platforms blink away';
   const id = b.troll(name, { type: 'blinking-platform', x: 6, w: 6, hint: 'The two platforms blink out for a moment every few seconds – start hopping right after they reappear.' });
   const on = b.uid('blink');
-  b.trigger({ id: on, when: { zone: b.rect(1, 8, 1, 7) }, every: 140, do: [{ hide: a }, { hide: c }], troll: id });
-  b.trigger({ when: { after: on }, delay: 50, every: 140, do: [{ show: a }, { show: c }] });
+  b.trigger({ id: on, when: { zone: b.rect(1, 8, 1, 7) }, every: 160, do: [{ hide: a }, { hide: c }], troll: id });
+  b.trigger({ when: { after: on }, delay: 40, every: 160, do: [{ show: a }, { show: c }] });
   const X = b.px(0);
   const wait = [run(X + 3 * T + 10), ['', `s.g.${a}[2]===0`], ['', `s.g.${a}[2]===1`]];
   return {
     w: 18,
     win: [...wait, J(10), land, ['R', 2], J(10), land, run(X + 13 * T - 25), J(10), land, run(X + 17 * T)],
-    traps: { [name]: [...wait, ['', 80], J(10), ['', 120]] },
+    traps: { [name]: [...wait, ['', 100], J(10), ['', 120]] },
   };
 }
