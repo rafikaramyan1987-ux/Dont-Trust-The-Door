@@ -20,6 +20,13 @@ export function label(
   return t;
 }
 
+/** Shrink a text object (uniformly) so it is at most `maxW` wide; returns it. */
+export function fitText(t: Phaser.GameObjects.Text, maxW: number): Phaser.GameObjects.Text {
+  t.setScale(1 / RES);
+  if (t.displayWidth > maxW) t.setScale((1 / RES) * (maxW / t.displayWidth));
+  return t;
+}
+
 export interface ButtonOpts {
   w: number;
   h: number;
@@ -49,7 +56,9 @@ export class Button extends Phaser.GameObjects.Container {
       this.add(this.iconImg);
     }
     if (o.text) {
-      this.txt = label(scene, o.icon ? 14 : 0, -2, o.text, o.fontSize ?? 28, '#ffffff', 6);
+      const room = o.w - (o.icon ? 64 : 24);
+      this.txt = fitText(label(scene, o.icon ? 14 : 0, -2, o.text, o.fontSize ?? 28, '#ffffff', 6), room);
+      this.txt.setData('room', room);
       this.add(this.txt);
     }
     this.onClick = onClick;
@@ -72,6 +81,12 @@ export class Button extends Phaser.GameObjects.Container {
 
   setIcon(icon: string): void {
     this.iconImg?.setTexture(`icon-${icon}`);
+  }
+
+  setText(text: string): void {
+    if (!this.txt) return;
+    this.txt.setText(text);
+    fitText(this.txt, this.txt.getData('room') as number);
   }
 }
 

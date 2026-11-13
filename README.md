@@ -2,293 +2,308 @@
 
 A troll platformer where the level betrays you. Original web game by AtelierPro Aramyan Games.
 
-Ten levels, ten different betrayals: the floor, coins, springs, the cave ceiling, your own
-controls, gravity, the EXIT door itself, the camera, things that chase you, and finally the moving
-platforms. Every level has its own idea, its own trap types (no trap type appears in two levels),
-its own layout style and colour palette. Traps are surprising the first time and fair the second
-time. Death restarts instantly (from the checkpoint flag once you have reached it); the death
-counter is always on screen. There are no text hints – but each level gives you **one light bulb**:
-press it once to see what the next trap does.
+Ten long levels, ten themes, **86 traps – every one a different idea**: the floor, coins, springs,
+the cave ceiling, your own controls, gravity, the EXIT door itself, the camera, things that chase
+you, and finally the moving platforms. No trap type, mechanic or map section appears twice. Every
+trap is surprising the first time and solvable the second: you always see the hero, each trap has
+one machine-checked solution, and a checkpoint flag follows every three traps. Death restarts
+instantly; the death counter is always on screen. Playable in **8 languages**.
 
 **Play:** https://rafikaramyan1987-ux.github.io/Dont-Trust-The-Door/ (phone: play in landscape)
 
 <p>
-<img src="docs/media/screens/level-01.png" width="49%">
-<img src="docs/media/screens/level-07.png" width="49%">
+<img src="docs/media/screens/level-04.png" width="49%">
+<img src="docs/media/screens/level-06.png" width="49%">
 </p>
 
-10 levels (118–149 tiles wide for levels 1–7, 201–214 for the hard finale levels 8–10; 6–10 troll
-moments each; a checkpoint in every level), title screen, level select, pause, restart, mute, hint,
-saving. Everything (art, sound, music) is generated in code.
+## How to play
 
+Reach the EXIT door – the real one. **← → / A D** move · **Space / ↑ / W** jump (hold = higher) ·
+**Esc / P** pause · **R** restart the level · **M** mute. On phones (landscape) big buttons sit in the
+side margins outside the level; the orange **restart** button is at the top right. Holding ▲ gives the
+same full jump as the jump key.
+
+- **Checkpoints:** a flag after every 3 traps – a death never costs more than 3 traps of progress.
+  The restart button always goes back to the very start.
+- **One hint per level (light bulb):** you choose when to use it. It explains the next trap ahead and
+  highlights exactly its dangerous tiles, then greys out until you finish the level or start it again
+  from level select. Apart from that, the only text in the levels is the move/jump instruction at
+  the start of level 1 (shown once); death quips are jokes, not hints.
+- **The camera never hides you:** when a camera trap looks elsewhere, a yellow arrow at the screen
+  edge shows where the hero is.
+
+## Languages
+
+English, Français, Deutsch, Español, Português (Brasil), Italiano, Русский, Türkçe. The game starts in
+the browser's language when it is one of these (otherwise English); the 🌐 button on the title screen
+and in the pause menu switches it and the choice is saved. Every text – menus, buttons, level names,
+hints, death quips, win messages, the fake "level clear" card, the tutorial, the EXIT sign, the
+"rotate your phone" screen – lives in one file per language: [`src/i18n/<code>.json`](src/i18n).
+Levels and code only use text keys. The bundled font (Nunito, SIL Open Font License) has Latin,
+Latin-extended (ç ğ ı ş ö ü, accents) and Cyrillic glyphs; button texts shrink to fit and the hint box
+wraps, which the self-test checks for every language at 640×360.
+
+<p>
+<img src="docs/media/screens/00-language-selector.png" width="49%">
+<img src="docs/media/screens/00-title-ru.png" width="49%">
+</p>
+
+## The 86 traps
+
+Each line: the trap, its type key (unique across the game) and its hint – which describes exactly
+the solution the bot uses to pass it.
+
+### 1. Hello, Floor — The floor is not what it seems
+
+236 tiles wide (was 118, ×2.00) · 8 traps · checkpoint after every 3 traps · bot win 33.2 s
+
+1. **The floor sinks into the abyss** (`sinking-floor`) – The cracked floor ahead slowly sinks into the abyss – step on it and jump off to the right straight away.
+2. **Two fake floor tiles over spikes** (`fake-floor`) – Two tiles in the middle of the plateau are fake – jump over them.
+3. **Cracked floor crumbles if you stop on it** (`collapsing-floor`) – The cracked floor in the dip crumbles shortly after you step on it – keep walking across.
+   - 🚩 *checkpoint*
+4. **The conveyor belt drags you into the pit** (`conveyor-floor`) – After the little pit the floor is a conveyor belt that drags you back into it – keep running right.
+5. **The hatch breaks under a hard landing** (`hard-landing-hatch`) – The bolted hatch after the spike breaks if you land on it hard – clear the spike with a tiny tap jump.
+6. **An invisible bridge over the wide pit** (`invisible-floor`) – An invisible bridge crosses the wide pit, but it starts 2 tiles out – jump from the edge, then walk.
+   - 🚩 *checkpoint*
+7. **Slippery ice slides you into the pit** (`ice-floor`) – The blue floor is ice: you cannot stop on it – keep running and jump at its very end.
+8. **The bridge crumbles behind you** (`crumbling-bridge`) – The long bridge crumbles plank by plank right after you step on it – keep running across.
+
+### 2. Greedy Little Blob — "Safe" coins are traps
+
+284 tiles wide (was 142, ×2.00) · 8 traps · checkpoint after every 3 traps · bot win 39.4 s
+
+1. **A coin in the trough bites** (`biting-coin`) – The coin lying in the trough has teeth – jump over the whole trough.
+2. **The coin arc over the pit bites** (`coin-arc`) – The coins above the pit bite – cross it with a small hop that stays under them.
+3. **Grabbing the lone coin makes spikes shoot up** (`cursed-coin`) – Do not jump for the lone coin above the stage – walk underneath it.
+   - 🚩 *checkpoint*
+4. **The coin trail leads into a pit** (`coin-trail`) – The coin trail from the high walkway leads into the pit – stay low and jump the pit from the ground.
+5. **Only the top of the coin wall is real** (`coin-wall`) – The lower half of the coin wall bites – jump so you fly through its top half.
+6. **Spiky coins rain from the sky** (`coin-rain`) – Coins rain down in three columns – wait until a shower hits the ground, then dash through.
+   - 🚩 *checkpoint*
+7. **A coin balloons into a giant spiked coin** (`giant-coin`) – The coin in the low corridor puffs up into a giant spiked coin – stop, wait until it shrinks, then go.
+8. **The coin explodes into spikes** (`coin-bomb`) – The coin in the tunnel explodes into spikes a moment after you grab it – keep running.
+
+### 3. Spring Fever — Springs
+
+275 tiles wide (was 135, ×2.04) · 8 traps · checkpoint after every 3 traps · bot win 40 s
+
+1. **The spring shoots you into ceiling spikes** (`spring-ceiling`) – The spring shoots you at spikes – hold LEFT while flying to go up through the gap.
+2. **The first spring is a dud** (`dud-spring`) – The first (rusty) spring over the void is a dud – jump past it onto the red one.
+3. **A spring pops out of the floor** (`hidden-spring`) – A spring pops out of the floor under the spiked bar – jump over that spot.
+   - 🚩 *checkpoint*
+4. **A sideways spring flings you into spikes** (`sideways-spring`) – The blue spring flings you sideways into spikes – jump over it.
+5. **A spring lobs a spiked ball at you** (`catapult-spring`) – Stepping on the stone plate makes the spring lob a spiked ball at you – keep running under it.
+6. **The rubber floor bounces you into spikes** (`rubber-floor`) – The springy floor only bounces when you land on it hard – walk on it and jump only under the gap in the ceiling.
+   - 🚩 *checkpoint*
+7. **The spring bounces higher every time** (`escalating-spring`) – The spring in the well bounces you higher each time – jump off to the right on the second bounce.
+8. **The diagonal spring flings you too far** (`overshoot-spring`) – The diagonal spring throws you way too far – let go of the keys after it launches you to land on the small island.
+
+### 4. Heavy Ceiling — The ceiling is out to get you
+
+260 tiles wide (was 129, ×2.02) · 8 traps · checkpoint after every 3 traps · bot win 39.1 s
+
+1. **Ceiling spikes drop on you** (`dropping-ceiling-spikes`) – The spikes under the low rock drop when you come near – step back, let them fall and rise, then go.
+2. **The cracked slab crashes down** (`crusher-slab`) – The cracked slab crashes down a moment after you step under it – sprint through without stopping.
+3. **Bonking the brick drops spiked rocks** (`loose-brick`) – Do not jump into the bolted brick – bonking it drops spiked rocks on you. Just walk under it.
+   - 🚩 *checkpoint*
+4. **A stone block slams down in rhythm** (`thwomp`) – The stone block slams down in a steady rhythm – wait until it lifts, then run under it.
+5. **Stalactites fall one after another** (`domino-stalactites`) – Once you pass the first stalactite they all fall one after another behind you – keep running.
+6. **The hole in the ceiling is a trap** (`fake-ceiling`) – The open hole in the low ceiling hides spikes – the way up is the cracked part that looks solid.
+   - 🚩 *checkpoint*
+7. **The whole roof slab crashes down** (`safe-notch`) – The whole roof slab crashes down – drop into the slot in the floor and wait there until it lifts.
+8. **The spiked ceiling comes down** (`descending-ceiling`) – The spiked ceiling lowers as soon as you enter – hurry to the pit and jump it while there is still room.
+
+### 5. Left Is Right — The controls betray you
+
+299 tiles wide (was 149, ×2.01) · 8 traps · checkpoint after every 3 traps · bot win 42 s
+
+1. **Left and right swap** (`controls-swap`) – On the purple floor left and right are swapped – hold LEFT to go right, and LEFT+jump over its pit.
+2. **The jump stops working** (`broken-jump`) – Jump does not work on the 2 grey tiles before the pit – take off just before the grey tiles.
+3. **Super jumps hit the spiked roof** (`super-jump`) – On the orange floor every jump is super strong – cross the pit with a short tap so you stay under the spiked roof.
+   - 🚩 *checkpoint*
+4. **You get the hiccups** (`hiccup-jump`) – On the green floor you hop by yourself every moment – wait in each gap for a hop, then run under the next spikes.
+5. **Your buttons lag behind** (`input-lag`) – On the teal floor every button reacts late – press jump about two tiles before the pit.
+6. **Your controls freeze** (`frozen-controls`) – The pale strip freezes your controls for a second and you keep sliding – step onto it slowly.
+   - 🚩 *checkpoint*
+7. **Turbo speed makes you overshoot** (`turbo-speed`) – On the red floor you run twice as fast – make a tiny hop onto the island, then a full jump from its edge.
+8. **You cannot stop running** (`auto-run`) – On the yellow floor you cannot stop running – jump the pit, the block and the wide pit right at their edges.
+
+### 6. Upside Downer — Gravity
+
+243 tiles wide (was 121, ×2.01) · 8 traps · checkpoint after every 3 traps · bot win 32.6 s
+
+1. **Gravity flips – drifting lands you in ceiling spikes** (`gravity-flip`) – Gravity suddenly flips and you fall up – let go of the keys so you land before the ceiling spikes, then jump over them.
+2. **Gravity flips back above a spike field** (`gravity-flip-back`) – At the end of the ceiling walk gravity flips back above spikes – keep holding RIGHT while you fall.
+3. **Floaty gravity – a jump hits the spikes** (`low-gravity`) – Gravity is weak at the end of the top step – do not jump (you would hit the spikes); just walk off the edge and float across.
+   - 🚩 *checkpoint*
+4. **Heavy gravity – you fall into tiny cracks** (`heavy-gravity`) – On the dark floor you are so heavy you fall into the thin cracks – hop over each crack.
+5. **The ground falls up into the sky** (`ground-falls-up`) – A chunk of the ground ahead falls up into the sky when you come near – jump over the hole it leaves.
+6. **A bubble makes you float up into spikes** (`floating-bubble`) – Inside the bubble over the pit you float upward – do not jump or stop, walk straight through it.
+   - 🚩 *checkpoint*
+7. **Jump flips gravity instead** (`flip-on-jump`) – On the blue strip jump flips gravity – flip up before the pit, then flip down right after it, before the ceiling spikes.
+8. **Gravity flips back and forth** (`gravity-pulse`) – Gravity flips up and down every moment – keep running: cross the floor spikes while you are on the ceiling.
+
+### 7. Too Many Doors — The EXIT keeps changing its mind
+
+250 tiles wide (was 125, ×2.00) · 8 traps · checkpoint after every 3 traps · bot win 37.1 s
+
+1. **A fake EXIT bites** (`fake-exit`) – That EXIT under the steps is fake and bites – climb the steps and go over the wall.
+2. **A door kicks you back into the pit** (`kick-door`) – The door after the pit kicks you back into it – jump over the door.
+3. **A door licks you with a spiked tongue** (`door-tongue`) – The door shoots out a spiked tongue when you come near – stop, let it lick and pull back, then jump over the door.
+   - 🚩 *checkpoint*
+4. **A portal door throws you at a pit** (`portal-door`) – The door in the wall is a portal and you come out just as fast, right before a pit – walk in slowly.
+5. **The EXIT grows legs and runs away** (`runaway-exit`) – The EXIT on the ledge runs away – do not walk off after it: jump from the very edge of the ledge.
+6. **Biting doors slam open and shut** (`slamming-doors`) – The three doors snap open and shut in turn – go through each one right after it opens.
+   - 🚩 *checkpoint*
+7. **The EXIT swaps itself for a fake** (`exit-swap`) – The EXIT ahead swaps itself for a biting fake when you come near – jump over the fake one.
+8. **The real EXIT hides inside the wall** (`hidden-exit`) – The wall top is spiked – step down from the stairs and walk into the wall: the real EXIT hides inside it.
+
+### 8. Screen Lies — The camera lies
+
+406 tiles wide (was 203, ×2.00) · 10 traps · checkpoint after every 3 traps · bot win 54.3 s
+
+1. **The camera stops following you** (`camera-freeze`) – The camera stops following you – keep going and watch the yellow arrow: jump three pits, 7, 14 and 19 tiles after the start of the frozen stretch.
+2. **The camera zooms in – tunnel vision** (`tunnel-vision`) – The camera zooms right in – go slowly: a pit, a spiked block (jump over it), another pit and a single spike follow.
+3. **The screen turns upside down** (`screen-flip`) – The screen turns upside down – your keys still work normally: jump the pit, walk under the spiked bar without jumping, jump the wide pit.
+   - 🚩 *checkpoint*
+4. **A fake "level clear" screen** (`fake-victory`) – The "level clear" card is fake – do not stop under it: a spiked ball drops right there. Keep running and jump the pit.
+5. **The lights go out** (`blackout`) – The lights go out and you only see around you – walk slowly: a pit, two spikes, a wide pit, a block and a last pit.
+6. **A smudge on the screen hides the way** (`screen-smudge`) – A smudge on the screen hides what is ahead – jump onto the block, then over the gap to the next block, then over a pit.
+   - 🚩 *checkpoint*
+7. **The camera looks the wrong way** (`backward-camera`) – The camera looks behind you, so things ahead pop up late – a spike, a pit, a block with a spike after it, then a wide pit.
+8. **The lights only flash** (`strobe-lights`) – It is dark except for short flashes – a pit, a block, a wide pit, a spike before a spiked bar (hop it low), then a pit.
+9. **The screen rocks like a ship** (`seasick-tilt`) – The screen rocks like a ship and the steps look tilted – they are level: jump up two steps, down one, then across.
+   - 🚩 *checkpoint*
+10. **The camera follows a fake you** (`decoy-hero`) – A fake you runs back and the camera follows it – follow the yellow arrow: the real you jumps a pit, a wide pit, a block and a wide pit.
+
+### 9. Run! — Something is always chasing you
+
+429 tiles wide (was 214, ×2.00) · 10 traps · checkpoint after every 3 traps · bot win 59.2 s
+
+1. **A spiked ball rolls after you** (`rolling-ball`) – A spiked ball rolls after you, faster than you – keep running and jump the ditch: the ball falls into it.
+2. **A turret shoots spiked balls** (`spike-turret`) – The turret at the end fires spiked balls along the floor – jump over each ball as it comes, then hop onto the turret.
+3. **A spike wall chases you** (`chasing-wall`) – A spike wall chases you, only a little slower than you – never stop: hop the bump, jump the pit, jump the block.
+   - 🚩 *checkpoint*
+4. **A spiked fish leaps out of the pit** (`spiked-fish`) – A spiked fish leaps out of the pit as you come near – wait at the edge until it drops back, then jump.
+5. **A spiked bird dives at you** (`homing-bird`) – A spiked bird hunts you, faster than you can run – hide in the low tunnel ahead: it crashes into the roof.
+6. **A floor of spikes rises** (`rising-flood`) – A floor of spikes rises out of the pit – climb the ledges quickly without waiting.
+   - 🚩 *checkpoint*
+7. **A frog copies your jumps** (`copycat-frog`) – The spiked frog jumps whenever you jump – do a small hop when it is about 4 tiles away and run under it while it is in the air.
+8. **A storm cloud strikes where you stand** (`storm-cloud`) – A storm cloud follows you and strikes where you stand – only stop under the stone roofs, and pass the spikes when they are down.
+9. **The floor is eaten away behind you** (`floor-eater`) – Something eats the thin bridge behind you faster than you can run – get up on the stone pillars and hop from pillar to pillar.
+   - 🚩 *checkpoint*
+10. **Your shadow replays your path** (`shadow-clone`) – A shadow of you follows your exact path a moment later – touching it kills: never stop and never go back.
+
+### 10. The Grand Betrayal — Moving platforms betray you
+
+402 tiles wide (was 201, ×2.00) · 10 traps · checkpoint after every 3 traps · bot win 61.6 s
+
+1. **The platform dodges your jump** (`shy-platform`) – The platform slides two tiles away when you jump at it – aim two tiles further than it is.
+2. **The platforms blink away** (`blinking-platform`) – The two platforms blink out every few seconds – start hopping right after they come back.
+3. **The platform splits under you** (`splitting-platform`) – The left half of the platform drops away when you land on it – jump from the very edge to land on its right half.
+   - 🚩 *checkpoint*
+4. **The elevator rises into ceiling spikes** (`elevator-spikes`) – The elevator goes all the way up into the spikes – jump right onto the ledge on the way up.
+5. **The loyal platform cannot keep up** (`loyal-platform`) – The platform follows you across the pit, but slowly – walk in short steps and stay above it.
+6. **The ferris wheel dips into spikes** (`ferris-wheel`) – Step onto a wheel platform as it comes up past the left island, ride it over the top and step off onto the right island before it dips into the spikes.
+   - 🚩 *checkpoint*
+7. **The shuttle dives into the void** (`shuttle-dive`) – The moving platform dives halfway across – jump to the far island before it does.
+8. **The platform flips its spikes up** (`flip-platform`) – The platform turns over every few seconds and its spikes come up top – cross right after it turns back.
+9. **The pulley sinks you into spikes** (`pulley-platforms`) – The two platforms hang on a pulley: yours sinks while the other rises – jump across as soon as it is a bit higher, then straight on to the high island.
+   - 🚩 *checkpoint*
+10. **The platform teleports away under you** (`teleporting-platform`) – The platform blinks out and reappears 4 tiles further – stand on it and jump forward the moment it blinks, then again.
 ## Run it
 
 ```bash
 npm install
 npm run dev        # http://localhost:5173  (also reachable from a phone on the same Wi-Fi)
-npm run build      # production build in dist/ (static files, ~1.5 MB)
-npm run preview    # serve dist/
-npm test           # validate levels → build → headless self-test (needs Playwright's Chromium:
-                   # npx playwright install chromium)
+npm run build      # production build in dist/
+npm test           # validate levels → i18n check → build → headless self-test
+                   # (needs Playwright's Chromium: npx playwright install chromium)
 ```
 
-Controls: **← → / A D** move · **Space / ↑ / W** jump (hold = higher) · **Esc / P** pause · **R** restart
-(from the start of the level) · **M** mute. On touch screens, large semi-transparent buttons sit in
-the side margins, outside the level; a big orange **restart** button sits on top of the right margin.
-Holding ▲ gives exactly the same full jump as holding the jump key – each finger keeps the button it
-pressed, even if it slides off the button while holding.
-
-**Hint (light bulb):** one per level. Pressing it shows a short tip about the next trap ahead of you
-and highlights that trap's area; then the bulb greys out. It comes back when you finish the level or
-start it again from level select (dying or restarting does not give it back). It changes nothing
-else. The only other text in the game is the move/jump instruction at the start of level 1, shown
-once.
-
-URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touch controls on desktop,
+URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touch controls,
 `?unlock` (on the level-select screen) unlocks every level.
 
 ## Tech
 
-- Vite + TypeScript + Phaser 3.90 (Arcade physics), WebGL with Canvas fallback.
-- **Scrolling levels.** Levels are 18 tiles tall (40 px tiles) and up to 260 tiles wide. A world
-  camera follows the hero smoothly (with a little look-ahead) and stays clamped to the level; a
-  second UI camera draws the HUD, touch buttons and overlays in a fixed design space. Phones in
-  landscape show ~22 tiles across (the hero is ~1.6× bigger than in the first slice) and the touch
-  buttons live in side pillars that the world camera never draws into. Desktop shows the full
-  18-tile height. Portrait phones get a "rotate your phone" message.
-- **Terrain** is an auto-tiled Phaser tilemap built from a generated tileset (16 neighbour masks ×
-  3 variants), so only visible tiles are drawn and no texture ever exceeds phone limits. Trap blocks
-  are drawn with the same per-tile painter, so they are indistinguishable from the ground.
-- **Fixed 60 Hz simulation.** The game advances in deterministic 1/60 s ticks (Arcade's world is
-  stepped manually), independent of the display frame rate. That makes the recorded bot replays
-  exact and the trap slow-motion free of side effects.
-- Feel: coyote time, jump buffering, variable jump height, snappy acceleration, stronger fall gravity.
-- **Checkpoint:** one flag per level. A death after touching it respawns there; the whole level is
-  rebuilt so every trap is re-armed, except triggers marked `keep` that lie before the flag (the door
-  that already fled stays where it ran to). The restart button always goes back to the start.
-- Saving: unlocked levels, deaths per level, total deaths, mute and "tutorial seen" in
-  `localStorage` (try/catch).
-- **No soft-locks.** The level validator includes a static analyzer (`tests/softlock.mjs`) that
-  explores every spot the hero can reach in every world state (each trap fired or not, moving
-  platforms at intermediate positions, after gravity/zero-jump zones, springs, riding platforms) and
-  proves that from each one the hero can still reach the EXIT – or die. A pit you can fall into
-  but not jump out of, and can't die in, fails the build.
+- Vite + TypeScript + Phaser 3.90 (Arcade physics). Art, sound and music are generated in code.
+- Deterministic fixed 60 Hz simulation (Arcade stepped manually), so bot replays are frame-exact.
+  Camera tricks (freeze, zoom, flip, darkness, strobe, smudge, look-back, seasick tilt, decoy) are
+  presentation only and never change the simulation.
+- Levels are 18 tiles tall and 236–429 tiles wide; a follow camera shows ~22 tiles across on phones.
+  Terrain is an auto-tiled tilemap.
+- Saving (`localStorage`, try/catch): unlocked levels, deaths, mute, the tutorial flag and the
+  language. Old saves without a language still load.
 
 ```
 src/
-  scenes/GameScene.ts   simulation, traps & triggers, cameras, HUD, checkpoint
-  game/Hero.ts Door.ts  the two characters
-  art.ts audio.ts       procedural textures, sound and music
-  levels/*.json         ← the levels (generated by the builder, or hand-written)
-tools/level-builder/    segments.mjs (troll set-pieces) + build.mjs (the 10 level recipes)
-tests/                  validator, plans.json, recorded replays, self-test
-tools/capture-media.mjs screenshots (and the trailer)
+  scenes/GameScene.ts   simulation, traps & triggers, cameras, HUD, checkpoints, hint
+  i18n/                 index.ts (t(), language detection) + one JSON file per language
+  levels/*.json         the levels (generated)
+tools/level-builder/    levels/Lnn.mjs (the hand-made trap segments), lib.mjs, build.mjs, danger.mjs
+tests/                  validator, soft-lock analyzer, i18n check, replays, self-test
 ```
 
-## Levels
+### Level data and the builder
 
-| # | Level | Main idea | Trap types (used in no other level) | Palette |
+Each level JSON has an 18-row `map` (characters for blocks, spikes, pads, coins, doors, checkpoints
+and named groups), `groups` (what a group is: block, spikes, coin, pad, fake door… plus options such
+as `conveyor`, `ice`, `invisible`, `orbit`, `follow`, `pulley`, `turret`, `frog`, `homing`, `kick`,
+`warp`), `triggers` (`when` a zone/touch/landing → `do` actions such as `fall`, `pop`, `move`,
+`chase`, `toss`, `eat`, `controls`, `gravity`, `camera`, `storm`, `clone`; `hold` zones apply only
+while you are inside) and `trolls` – one per trap with its `type`, `hint` key, `danger` rects (what
+the hint highlights) and `solution` (bot plan steps).
+
+Every trap is a segment function in `tools/level-builder/levels/Lnn.mjs` that draws its own terrain,
+registers its trap and returns its solution and a run that falls for it. `npm run levels` builds the
+JSON (checkpoints after every 3 traps, seeded trap-free connectors up to the target width, the
+danger area computed from the trap's own triggers and groups) and validates it; `npm run record`
+records frame-exact replays.
+
+## Tests (all run in CI)
+
+- **`npm run test:levels`** – widths ≥ 2× the previous ones; exactly 8 traps (10 in levels 8–10),
+  86 in total, all trap types unique; every trap has a hint key and a solution; its highlight equals
+  its trigger area; a checkpoint after every 3 traps; no copied terrain (no 12-column stretch with ≥4
+  non-trivial columns appears twice; groups compare by kind); no text except the level-1 tutorial;
+  **no soft-locks**: `tests/softlock.mjs` explores every spot the hero can reach in every world state
+  (traps fired or not, moving/orbiting/following/pulley platforms at sampled positions, teleports,
+  zone effects, portals) and proves the hero can still reach the EXIT or die. It still finds the pit
+  reported in the old level 1 (`tests/fixtures/`).
+- **`npm run test:i18n`** – fails if any language misses a key (or has extra/empty ones or broken
+  placeholders), or if a key used by code or levels is undefined.
+- **`npm run test:bot`** (headless Chromium, production build) – every level played through by the
+  bot in real time on a 640×360 phone screen; every level won from the start and from each
+  checkpoint; for each of the 86 traps its solution from the previous checkpoint passes and walking
+  into it kills; a screenshot of every trap at 640×360; hint highlight, lifecycle and "changes
+  nothing"; tutorial once, no text after deaths; checkpoint respawns; saving incl. old saves;
+  default language, selector, saving, font coverage and text fitting in all 8 languages; the edge
+  arrow; layouts, touch and the full ▲ jump; no console errors.
+
+Latest run: **179/179 checks passed**.
+
+| Level | Width | Bot win from start | from checkpoints | Real time on a 640×360 phone |
 |---|---|---|---|---|
-| 1 | Hello, Floor | The floor is not what it seems | `sinking-step`, `fake-floor`, `collapsing-floor`, `crumbling-bridge` | Mint Meadow |
-| 2 | Greedy Little Blob | "Safe" coins are traps | `biting-coin`, `coin-arc`, `cursed-coin`, `coin-trail` | Golden Hour |
-| 3 | Spring Fever | Springs | `spring-ceiling`, `dud-spring`, `hidden-spring`, `sideways-spring` | Candy Clouds |
-| 4 | Heavy Ceiling | Falling ceilings | `dropping-ceiling-spikes`, `crusher-slab`, `thwomp`, `tunnel-ceiling-spikes` | Deep Cave |
-| 5 | Left Is Right | The controls betray you | `controls-swap`, `broken-jump`, `auto-run` | Neon Arcade |
-| 6 | Upside Downer | Gravity | `gravity-flip`, `gravity-flip-back`, `low-gravity`, `heavy-gravity` | Twilight Tiles |
-| 7 | Too Many Doors | The EXIT keeps changing its mind | `fake-exit`, `runaway-exit`, `exit-swap`, `hidden-exit` | Royal Castle |
-| 8 | Screen Lies | The camera lies | `camera-freeze`, `screen-flip`, `tunnel-vision`, `fake-victory` | Midnight |
-| 9 | Run! | Something is always chasing you | `rolling-ball`, `chasing-wall`, `rising-flood` | Lava |
-| 10 | The Grand Betrayal | Moving platforms betray you | `shuttle-dive`, `shy-platform`, `blinking-platform`, `elevator-spikes` | Sunset |
-
-| # | Width (tiles) | Bot win from start / checkpoint (s) | Troll moments |
-|---|---|---|---|
-| 1 | 118 | 16 / 8.2 | 7: The floor sags under you · Two fake floor tiles over spikes · Cracked floor crumbles if you stop on it · The bridge crumbles behind you · Two fake floor tiles over spikes (2) · The floor sags under you (2) · Cracked floor crumbles if you stop on it (2) |
-| 2 | 142 | 18.3 / 10.5 | 7: A coin on the floor bites · The coin arc over the pit bites · Grabbing the lone coin makes spikes shoot up · The coin trail leads into a pit · A coin on the floor bites (2) · The coin arc over the pit bites (2) · Grabbing the lone coin makes spikes shoot up (2) |
-| 3 | 135 | 19.1 / 8.5 | 6: The spring shoots you into ceiling spikes · The first spring is a dud · A spring pops out of the floor · A sideways spring flings you into spikes · A spring pops out of the floor (2) · The first spring is a dud (2) |
-| 4 | 129 | 26.8 / 11.3 | 6: Ceiling spikes drop on you · The ceiling slab slams down · A ceiling block slams down in rhythm · The tunnel ceiling hides spikes · A ceiling block slams down in rhythm (2) · Ceiling spikes drop on you (2) |
-| 5 | 149 | 19.2 / 12.3 | 6: Left and right swap · Jump stops working · You cannot stop running · Jump stops working (2) · Left and right swap (2) · You cannot stop running (2) |
-| 6 | 121 | 16.1 / 8 | 6: Gravity flips – drifting lands you in ceiling spikes · Gravity flips back above a spike field · Floaty gravity – a full jump hits the ceiling · Heavy gravity – your jump is too weak · Floaty gravity – a full jump hits the ceiling (2) · Heavy gravity – your jump is too weak (2) |
-| 7 | 125 | 17.1 / 10.8 | 6: A fake EXIT bites · The EXIT grows legs and runs away · The EXIT swaps itself for a fake · A fake EXIT bites (2) · The real EXIT hides inside the wall · A fake EXIT in front of the wall |
-| 8 | 203 | 26.6 / 12.1 | 9: The camera stops following you · The screen turns upside down · The camera zooms in – tunnel vision · A fake "level clear" screen · The screen turns upside down (2) · The camera zooms in – tunnel vision (2) · A fake "level clear" screen (2) · The camera stops following you (2) · The screen turns upside down (3) |
-| 9 | 214 | 30.2 / 15.1 | 8: A spiked ball rolls after you · A spike wall chases you · Spikes rise from the floor · A spiked ball rolls after you (2) · A spike wall chases you (2) · Spikes rise from the floor (2) · A spiked ball rolls after you (3) · A spike wall chases you (3) |
-| 10 | 201 | 29 / 14.6 | 10: The shuttle dives into the void · The platform dodges your jump · The platforms blink away · The elevator rises into ceiling spikes · The platform dodges your jump (2) · The shuttle dives into the void (2) · The elevator rises into ceiling spikes (2) · The platforms blink away (2) · The platform dodges your jump (3) · The shuttle dives into the void (3) |
-
-Bot times are a frame-perfect run at full speed with zero hesitation (deterministic sim; the
-real-time run in the self-test is within ~1 s of these); a person's first clean run is much slower.
-Levels 8–10 are on average 1.57× as wide as levels 1–7 and have the most troll moments.
-
-## Level data format
-
-Each level is one JSON file in [`src/levels/`](src/levels), loaded automatically and ordered by file
-name. The map is **18 rows of equal length (32–260 characters)**:
-
-| char | meaning | char | meaning |
-|---|---|---|---|
-| `.` | empty | `#` | solid block |
-| `^ v < >` | spikes (pointing up/down/left/right) | `=` | jump pad |
-| `o` | coin (genuine) | `P` | player start |
-| `D` | the real EXIT (bottom tile; hangs upside-down if attached to a ceiling) | `F` | fake EXIT (bites) |
-| `C` | checkpoint flag (exactly one) | `a`–`z` (not `o`/`v`) | tile of a named **group** |
-| `*` | spiked ball | | |
-
-`hints` (text in the level) is allowed only in level 1, for the move/jump instructions.
-
-```jsonc
-{
-  "id": 2, "name": "Solid Ground?", "world": 0, "winMessage": "The floor lied. Repeatedly.",
-  "deathQuips": ["The floor lied.", "Still lying."],
-  "idea": "\"Safe\" coins are traps",                                 // the level's one main idea
-  "map": ["...", "..."],
-  "groups": { "a": { "tile": "#", "cover": [[12,16],[13,16],[14,16]] } },
-  "triggers": [ { "when": { "touch": "a" }, "do": [ { "fall": "a", "shake": 3 } ], "troll": "t1" } ],
-  "trolls": [ { "id": "t1", "name": "The floor collapses into spikes", "type": "collapsing-floor",
-                "x": 12, "w": 3, "hint": "Don't stop on the cracked floor." } ],   // x/w: tiles; hint: the bulb text
-  "fakeExits": { "57": "t4" }                                       // F at tile x 57 → troll t4
-}
-```
-
-**Groups:** `tile` (`#`, a spike char, `=`, `o`), `hidden` (starts retracted / invisible), `fake`
-(blocks you fall through, spikes that are harmless and squash flat), `trapCoin` (coin turns into a
-spiky ball), `look` (`cracked` / `bolted` hints), `cover` (extra tiles drawn as part of the group, e.g.
-hiding a pit), `troll` (troll id credited when its built-in trick fires), `launch: [vx, vy]` (a
-sideways spring), `dud: true` (a spring that does nothing).
-
-**Triggers** fire once per attempt. `when`: `zone: [x, y, w, h]` (tiles, may be fractional; optional
-`airborne` / `grounded`), `touch: "a"`, `start: true`, or `after: "<trigger id>"`. Options: `delay`
-(ticks, 60 = 1 s), `every` (repeat the actions every N ticks – rhythmic traps), `troll` (troll id),
-`keep` (see Checkpoint above). **Actions:**
-
-| action | effect |
-|---|---|
-| `{ "fall": "a", "shake": 6 }` | group shakes, then drops away |
-| `{ "pop": "a" }` / `{ "retract": "a" }` | hidden spikes shoot out / go back |
-| `{ "move": "a", "by": [0, 4], "ticks": 14, "deadly": true, "returnAfter": 50, "returnTicks": 40 }` | slide a group; `deadly` crushes while moving |
-| `{ "chase": "w", "vel": [3.4, 0], "untilX": 23 }` | move a group continuously (px per tick; `untilY` for vertical) |
-| `{ "doorRun": [[26,14],[28,12]], "speed": 7, "hehe": 28 }` | the EXIT says "hehe", grows legs and runs along tile waypoints |
-| `{ "gravity": "flip" }` / `"normal"` | flip gravity |
-| `{ "controls": "flip" \| "nojump" \| "autorun" \| "normal" }` | swap left / right, disable jumping, force running |
-| `{ "gravityScale": 0.45 }` | floaty (< 1) or heavy (> 1) gravity |
-| `{ "camera": "freeze" \| "follow" \| "flip" \| "unflip" \| "zoom" \| "unzoom" }` | the camera lies |
-| `{ "fakeClear": true }` | a fake "level clear" card |
-| `{ "show": "a" }` / `{ "hide": "a" }` | make a group appear / vanish (vanishing platforms) |
-| `{ "say": "text", "at": "hero" \| "door" \| [x, y] }`, `{ "doorHehe": 40 }`, `{ "shake": 4 }`, `{ "slowmo": 20 }`, `{ "scare": true }` | effects |
-
-Every trap action adds the juice automatically (shocked face, short slow motion, sound); repeats of a
-rhythmic trap stay quiet.
-
-### Making levels fast: the level builder
-
-The shipped levels are composed from **troll set-pieces** in
-[`tools/level-builder/segments.mjs`](tools/level-builder/segments.mjs). Every segment belongs to
-exactly one level (`l1Sink`, `l2Bite`, `l3Dud`, … `l10Blink`), plus shared start / checkpoint / end
-pieces. Each segment draws its tiles, registers its triggers and its trolls (`name`, `type`, region
-and hint), and writes the bot plan that beats it and the plan that falls for it. The builder refuses
-a trap type that is used by two levels. A level is a list of segments in
-[`build.mjs`](tools/level-builder/build.mjs):
-
-```js
-segments: [S.start, S.l1Sink, S.l1Fake, S.l1Collapse, S.checkpoint, S.l1Bridge, ...]
-```
-
-```bash
-npm run levels    # regenerate src/levels/*.json and tests/plans.json (+ validate)
-npm run record    # regenerate, build, record frame-exact bot replays (tests/replays/)
-npm test          # validate + self-test
-```
-
-## Self-test
-
-- `npm run test:levels` – every level: 18 equal rows, width 32–260, legal characters, one `P`, one
-  `D`, one `C`, groups and trigger references valid, ≥ 5 trolls, each troll wired up and with a
-  type, region and hint; each trap type used by one level only; different palettes and ideas; text
-  only in level 1; **no soft-locks** (static analysis, see Tech).
-- `tests/replays/level-NN.json` – recorded frame-exact inputs: `win` (from the start), `cp` (from
-  the checkpoint) and one replay per trap that must kill.
-- `tests/run-selftest.mjs` – against the production build in headless Chromium: the level-design
-  rules again (no soft-locks; the analyzer must also find the reported pit in a copy of the old
-  level 1 in `tests/fixtures/`); every level won in real time by the bot at a steady frame rate; won
-  again from the start and from the checkpoint in the deterministic sim; every trap replay kills
-  exactly once; **every listed troll moment fires**; the hint button names the next trap, greys
-  out, survives deaths/restarts, resets on level select / next level and changes nothing (the bot
-  wins on the same tick with it pressed); the level-1 instructions show once only and no text
-  appears after deaths; checkpoint respawn lands on the flag (the runaway door stays away) and
-  restart returns to the start; death counter / HUD / save / reload / blocked storage; phone
-  landscape (~22 tiles visible, buttons outside the level, real multi-touch input, **▲ held = the
-  same full jump as the keyboard, also with the thumb sliding off**, restart button visible and
-  ≥ 44 px), portrait "rotate" message, desktop layout; no console errors; build < 10 MB.
-  CI (`.github/workflows/ci.yml`) runs all of this on every push.
-
-### Results (latest run)
-
-**171/171 checks passed** (2026-11-13, `npm test`). Highlights:
-
-| | check | result |
-|---|---|---|
-| ✅ | soft-lock detector finds the reported pit in the OLD level 1 (cols 82-94) | col 87 row 14 |
-| ✅ | every level has its own idea, palette and trap types (no type in two levels) | 38 trap types, 10 ideas, 10 palettes |
-| ✅ | no text hints in the levels (only the level-1 controls), none after deaths | level 1: ← →  move / SPACE / ▲  jump |
-| ✅ | levels 8-10 are ~1.5× as long as levels 1-7 | avg 1-7: 131 tiles; 8-10: 203, 214, 201 (×1.57) |
-| ✅ | levels 8-10 have more troll moments | 1:7 2:7 3:6 4:6 5:6 6:6 7:6 8:9 9:8 10:10 |
-| ✅ | bot completes level 1 in real time | won, 17.3 s, 60 fps, p95 frame 17.4 ms |
-| ✅ | bot completes level 2 in real time | won, 18.9 s, 60 fps, p95 frame 17.4 ms |
-| ✅ | bot completes level 3 in real time | won, 19.7 s, 60 fps, p95 frame 18.1 ms |
-| ✅ | bot completes level 4 in real time | won, 29.2 s, 60 fps, p95 frame 18.0 ms |
-| ✅ | bot completes level 5 in real time | won, 20.7 s, 60 fps, p95 frame 18.2 ms |
-| ✅ | bot completes level 6 in real time | won, 17.6 s, 60 fps, p95 frame 17.5 ms |
-| ✅ | bot completes level 7 in real time | won, 18.1 s, 60 fps, p95 frame 17.8 ms |
-| ✅ | bot completes level 8 in real time | won, 29.3 s, 60 fps, p95 frame 17.6 ms |
-| ✅ | bot completes level 9 in real time | won, 33.3 s, 60 fps, p95 frame 17.3 ms |
-| ✅ | bot completes level 10 in real time | won, 30.1 s, 60 fps, p95 frame 17.4 ms |
-| ✅ | stable ~60 fps during the real-time bot run | avg 60.0 fps, worst level avg 60.0 fps (480×270, software WebGL) |
-| ✅ | progress saved: all 10 levels completed/unlocked | {"unlocked":10,"completed":10} |
-| ✅ | death counter equals number of deaths | 67 == 67 |
-| ✅ | HUD death counter shows the total | HUD "67" |
-| ✅ | save survives a page reload | totalDeaths=67, per level {"1":5,"2":7,"3":6,"4":6,"5":6,"6":6,"7":4,"8":9,"9":8,"10":10} |
-| ✅ | blocked localStorage is handled (try/catch) | ok |
-| ✅ | level 1: the restart button goes back to the very start | x=100 |
-| ✅ | level 7: the door that already ran away stays away after the checkpoint respawn | door x 1220 → 2429 (running), after respawn 2740 (its destination) |
-| ✅ | level 10: the restart button goes back to the very start | x=100 |
-| ✅ | hint button is available at the start of a level | {"used":false,"btn":{"alpha":1,"enabled":true,"visible":true}} |
-| ✅ | hint is used once, then the button greys out | "Those ceiling spikes drop – step back and wait until they go up again.", alpha 0.35 |
-| ✅ | dying or restarting does not give the hint back | after death true, after restart true |
-| ✅ | hint resets when the level is replayed from level select or the next level starts | {"select":false,"next":{"level":2,"used":false}} |
-| ✅ | level-1 move/jump instructions are shown once, never again | first visit: ← →  move / SPACE / ▲  jump; second visit: 0 texts |
-| ✅ | no text hint appears after deaths in any level | texts after 6 deaths per level: 0,0,0,0,0,0,0,0,0,0 |
-| ✅ | restart after death is instant (< 0.3 s) | 268 ms |
-| ✅ | CPU time per frame at 1280×720 is far below the 16.7 ms budget | 0.48 ms/frame |
-| ✅ | level rebuild on restart is cheap | 2.76 ms (restart delay itself is 16 ticks = 267 ms) |
-| ✅ | desktop 1280×720: level fills the screen, no touch buttons | {"zoom":1,"touch":false} |
-| ✅ | desktop: restart button is visible on screen | 78×78 px at (1047, 1) |
-| ✅ | phone landscape: camera shows ~22 tiles across and follows the hero | 22.0 tiles visible, hero 19.6 css px tall (was 12.5 px when the whole 32-tile level was shown) |
-| ✅ | phone landscape 844×390: buttons visible, ≥44 px, outside the level area | level spans 114–730 css px; buttons left 52×99@29, right 52×99@85, jump 106×117@787 |
-| ✅ | touch: holding ▶ moves the hero right | x 100 → 227, vx 300 |
-| ✅ | touch: second finger on jump makes the hero jump (multi-touch) | min y 464 (ground 586) |
-| ✅ | touch: holding ▲ gives exactly the same full jump as holding the keyboard key | keyboard 122.5 px, ▲ 122.5 px, ▲ with thumb sliding into the level 122.5 px |
-| ✅ | phone landscape: restart button is visible, ≥44 px, outside the level area | 63×63 css px at (755, 27) |
-| ✅ | phone portrait 390×844 shows "rotate your phone" | {"display":"flex","text":"Rotate your phone"} |
-| ✅ | no console errors |  |
-| ✅ | production build under 10 MB | 1.55 MB |
-| ✅ | no soft-locks in any of the 10 levels | 10/10 levels, 1800, 612, 488, 3319, 262, 210, 400, 334, 3656, 7783 reachable spots |
-| ✅ | every level completable from the start and from its checkpoint | 20/20 |
-| ✅ | every troll moment fires | 10/10 levels |
-| ✅ | 67 trap replays each kill exactly once | see test-results/selftest.json |
-| ✅ | hint button shows the next trap and changes nothing | 10/10 levels (same winning tick) |
-| ✅ | death after the checkpoint respawns at the flag | 10/10 levels |
-
-Headless Chromium has no GPU (WebGL is rasterised on the CPU), so the real-time run uses a small
-window and the CPU cost of a full 1280×720 frame is measured separately; on a phone the GPU does the
-drawing. On CI runners the timing checks are reported but not enforced.
+| 1 | 236 | 33.2 s | 22 / 7.9 s | 34.5 s |
+| 2 | 284 | 39.4 s | 25.6 / 11.4 s | 41.1 s |
+| 3 | 275 | 40 s | 24.9 / 10.5 s | 41.4 s |
+| 4 | 260 | 39.1 s | 24.8 / 11 s | 43.9 s |
+| 5 | 299 | 42 s | 28.1 / 10 s | 45.2 s |
+| 6 | 243 | 32.6 s | 21.3 / 9.3 s | 35.6 s |
+| 7 | 250 | 37.1 s | 23.8 / 5.8 s | 39.7 s |
+| 8 | 406 | 54.3 s | 38 / 21.8 / 5.3 s | 58 s |
+| 9 | 429 | 59.2 s | 42.3 / 24.6 / 6.9 s | 62.5 s |
+| 10 | 402 | 61.6 s | 46.6 / 23.2 / 7.1 s | 64.1 s |
 
 ## Media
 
-- Screenshots (phone landscape 844×390 with the touch controls): [`docs/media/screens/`](docs/media/screens)
-  – title, hero expressions, level select, a troll moment from every level, the hint button, the
-  checkpoint, desktop.
-  Regenerate with `npm run build && node tools/capture-media.mjs --screens-only`.
-- Trailer: [`docs/media/trailer-9x16.mp4`](docs/media/trailer-9x16.mp4) – 20 s vertical video of troll
-  moments from the current levels (`node tools/capture-media.mjs --video-only`).
+- Screenshots (phone landscape with touch controls): [`docs/media/screens/`](docs/media/screens) –
+  title (also in Russian and Turkish), language selector, level select, a trap from every level, the
+  hint, the checkpoint, desktop. `npm run build && node tools/capture-media.mjs --screens-only`.
+- Trailer: [`docs/media/trailer-9x16.mp4`](docs/media/trailer-9x16.mp4) – 20 s vertical video
+  (`node tools/capture-media.mjs --video-only`).
 
 ## Deployment
 
 `.github/workflows/pages.yml` builds every push to `main` and publishes `dist/` to the `gh-pages`
-branch (GitHub Pages: Settings → Pages → Deploy from a branch → `gh-pages` / root).
+branch.

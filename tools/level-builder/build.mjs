@@ -1,22 +1,32 @@
-// Level builder: composes long levels from troll set-pieces (segments.mjs) and writes
-//   src/levels/NN-name.json   – the level data the game loads
-//   tests/plans.json          – the bot's condition-based plans (win from start, win from
-//                               the checkpoint, and one plan per troll that must kill)
-// Usage: node tools/level-builder/build.mjs
+// Level builder: composes the 10 levels from hand-made trap segments (levels/Lnn.mjs) and
+// writes
+//   src/levels/NN-slug.json  – the level data the game loads
+//   src/i18n/en.json         – English texts (UI strings + every level text)
+//   tests/plans.json         – the bot's condition-based plans: win from the start, win from
+//                              every checkpoint, and per trap: its solution run from the
+//                              previous checkpoint and a run that falls for it
+// Usage: node tools/level-builder/build.mjs [levelIds…]
 //
-// The JSON files are the source of truth for the game; this script is just a fast way to
-// author many long levels. Hand-written JSON levels work too (see README).
-import { writeFileSync, readdirSync, unlinkSync } from 'node:fs';
+// Every trap segment registers exactly one troll. Its hint highlight ("danger") is computed
+// here from the trap's own triggers and groups, so the highlight always equals the trigger
+// area. Checkpoints go after every third trap; trap-free connectors fill each level up to
+// its target width (they are seeded, so no terrain pattern repeats).
+import { writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as S from './segments.mjs';
+import { start, checkpoint, end, connector } from './lib.mjs';
+import { dangerTiles } from './danger.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROWS = 18;
-const LETTERS = 'abcdefghijklmnpqrstuwxyz'.split(''); // no o / v (coin & spike chars)
+/** Shifts every connector's random seed (picked so that no terrain pattern repeats). */
+const SALT = Number(process.env.DTTD_SALT ?? 7);
+// group ids: a-z (not o, v), A-Z (not P, D, F, C, H), 0-9
+const IDS = [...'abcdefghijklmnpqrstuwxyz', ...'ABEGIJKLMNOQRSTUVWXYZ', ...'0123456789'];
 
 class Builder {
-  constructor(labels) {
+  constructor(id, labels) {
+    this.id = id;
     this.cols = 0;
     this.grid = Array.from({ length: ROWS }, () => []);
     this.groups = {};
@@ -30,7 +40,10 @@ class Builder {
     this.uids = 0;
     this.lastF = null;
     this.hasDoor = false;
+    this.text = {};
+    this.decors = [];
   }
+  decor(x, y, w, h, kind) { this.decors.push({ x: this.x0 + x, y, w, h, kind }); }
   at(label) { return this.labels[label] ?? 0; }
   label(name) { this.newLabels[name] = this.x0; }
   px(t) { return (this.x0 + t) * 40; }
@@ -38,6 +51,7 @@ class Builder {
     if (y < 0 || y >= ROWS) return;
     const row = this.grid[y];
     while (row.length <= x) row.push('.');
+    if (row[x] !== ch && IDS.includes(row[x]) && this.groups[row[x]]) throw new Error(`level ${this.id}: tile ${x},${y} of group '${row[x]}' overwritten by '${ch}' (use cover)`);
     row[x] = ch;
     this.cols = Math.max(this.cols, x + 1);
     if (ch === 'F') this.lastF = x;
@@ -53,24 +67,29 @@ class Builder {
     return out;
   }
   rect(x, y, w, h) { return [this.x0 + x, y, w, h]; }
+  tile(x, y) { return [this.x0 + x, y]; }
   group(def) {
-    const id = LETTERS[Object.keys(this.groups).length];
-    if (!id) throw new Error('too many groups in one level');
+    const id = IDS[Object.keys(this.groups).length];
+    if (!id) throw new Error(`level ${this.id}: too many groups`);
     this.groups[id] = JSON.parse(JSON.stringify(def));
     return id;
   }
   groupTroll(g, trollId) { this.groups[g].troll = trollId; }
-  /** Register a troll moment: its trap type, where it is (local tile x/width) and its hint. */
-  troll(name, { type, x, w, hint }) {
-    if (!type || !hint || x === undefined || !w) throw new Error(`troll "${name}" needs type, x, w and hint`);
-    let n = name, k = 2;
-    while (this.trolls.some((t) => t.name === n)) n = `${name} (${k++})`;
+  /**
+   * Register the segment's trap. `hint` is the English hint text (stored under the key
+   * trap.<type>), `hazards` extra dangerous tile rects (local) that no trigger/group covers.
+   */
+  troll(name, { type, hint, hazards = [] }) {
+    if (!type || !hint) throw new Error(`troll "${name}" needs type and hint`);
+    if (this.trolls.length && this.curSeg?.troll) throw new Error(`segment ${this.curSeg.fn} registers two trolls`);
     const id = `t${this.trolls.length + 1}`;
-    this.trolls.push({ id, name: n, type, x: this.x0 + x, w, hint });
+    const key = `trap.${type}`;
+    this.text[key] = hint;
+    this.trolls.push({ id, name, type, hint: key, hazards: hazards.map(([x, y, w, h]) => [this.x0 + x, y, w, h]) });
+    if (this.curSeg) this.curSeg.troll = id;
     return id;
   }
-  tutorial(x, y, text) { this.hints.push({ x: this.x0 + x, y, text }); }
-  trollName(id) { return this.trolls.find((t) => t.id === id).name; }
+  tutorial(x, y, key) { this.hints.push({ x: this.x0 + x, y, text: key }); }
   trigger(def) { this.triggers.push(def); }
   uid(p) { return `${p}${++this.uids}`; }
   doorAt(x, y) {
@@ -81,143 +100,164 @@ class Builder {
   fakeExit(trollId) { this.fakeExits[String(this.lastF)] = trollId; }
 }
 
-function buildLevel(spec, labels) {
-  const b = new Builder(labels);
+/** Expand a recipe: start, traps (checkpoint after every 3rd), connectors, end. */
+function layout(spec, fillers) {
+  const style = spec.style ?? 'ground';
+  const items = [[start, { tutorial: spec.id === 1, style }]];
+  spec.traps.forEach((tr, i) => {
+    const f = fillers[i];
+    if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i + SALT, style }]);
+    items.push(Array.isArray(tr) ? tr : [tr, {}]);
+    if ((i + 1) % 3 === 0 && i + 1 < spec.traps.length) items.push([checkpoint, { style }]);
+  });
+  const f = fillers[spec.traps.length];
+  if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99 + SALT, style }]);
+  items.push([spec.endSeg ?? end, { style }, 'end']);
+  return items;
+}
+
+function buildLevel(spec, items, labels) {
+  const b = new Builder(spec.id, labels);
   const segs = [];
-  for (const item of spec.segments) {
-    const [fn, opts, label] = Array.isArray(item) ? item : [item, {}, undefined];
+  for (const item of items) {
+    const [fn, opts, label] = item;
     if (label) b.label(label);
-    const trollsBefore = b.trolls.length;
+    const seg = { fn: fn.name, x0: b.x0, troll: null };
+    b.curSeg = seg;
     const resolved = typeof opts === 'function' ? opts(b) : opts;
     const r = fn(b, resolved);
-    // segments that rename duplicate trolls: map their trap names to the final names
-    const traps = {};
-    const newTrolls = b.trolls.slice(trollsBefore);
-    for (const [name, steps] of Object.entries(r.traps || {})) {
-      const t = newTrolls.find((x) => x.name === name || x.name.startsWith(name + ' ('));
-      traps[t ? t.name : name] = steps;
-    }
     // every segment starts on the ground (the previous one may end with a drop)
-    const win = r.win && r.win.length ? [['R', 's.grounded'], ...r.win] : [];
-    segs.push({ fn: fn.name, x0: b.x0, w: r.w, win, traps });
+    seg.w = r.w;
+    seg.win = r.win && r.win.length ? [['R', 's.grounded'], ...r.win] : [];
+    seg.die = r.die;
+    if (seg.troll && !r.die) throw new Error(`level ${spec.id}: trap segment ${fn.name} has no "die" plan`);
+    segs.push(seg);
     b.x0 += r.w;
   }
+  b.curSeg = null;
   return { b, segs };
 }
 
-function compile(spec) {
+function rectsOfTiles(tiles) {
+  const set = new Set(tiles.map(([x, y]) => `${x},${y}`));
+  const used = new Set();
+  const out = [];
+  const sorted = [...set].map((k) => k.split(',').map(Number)).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  for (const [x, y] of sorted) {
+    if (used.has(`${x},${y}`)) continue;
+    let w = 1;
+    while (set.has(`${x + w},${y}`) && !used.has(`${x + w},${y}`)) w++;
+    let h = 1;
+    outer: for (;;) {
+      for (let i = 0; i < w; i++) if (!set.has(`${x + i},${y + h}`) || used.has(`${x + i},${y + h}`)) break outer;
+      h++;
+    }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add(`${x + i},${y + j}`);
+    out.push([x, y, w, h]);
+  }
+  return out;
+}
+
+function compile(spec, fillers) {
+  const items = layout(spec, fillers);
   // two passes so segments can refer to positions of later segments (door destinations)
-  let { b } = buildLevel(spec, {});
-  const labels = b.newLabels;
-  const out = buildLevel(spec, labels);
+  let { b } = buildLevel(spec, items, {});
+  const out = buildLevel(spec, items, b.newLabels);
   b = out.b;
   const segs = out.segs;
   const W = b.cols;
   const rows = b.grid.map((row) => { const r = row.slice(); while (r.length < W) r.push('.'); return r; });
   if (spec.cave) for (let y = 0; y < spec.cave; y++) for (let x = 0; x < W; x++) if (rows[y][x] === '.') rows[y][x] = '#';
   const map = rows.map((r) => r.join(''));
+  const P = `L${spec.id}`;
+  const text = { ...b.text, [`${P}.name`]: spec.name, [`${P}.win`]: spec.winMessage };
+  spec.deathQuips.forEach((q, i) => { text[`${P}.quip${i + 1}`] = q; });
   const level = {
-    id: spec.id, name: spec.name, world: spec.id - 1, idea: spec.idea, winMessage: spec.winMessage,
-    deathQuips: spec.deathQuips, hints: b.hints, map, groups: b.groups, triggers: b.triggers,
+    id: spec.id, name: `${P}.name`, world: spec.id - 1, idea: spec.idea, winMessage: `${P}.win`,
+    deathQuips: spec.deathQuips.map((_, i) => `${P}.quip${i + 1}`), hints: b.hints, map, groups: b.groups, triggers: b.triggers,
     trolls: b.trolls, fakeExits: Object.keys(b.fakeExits).length ? b.fakeExits : undefined,
+    decor: b.decors.length ? b.decors : undefined,
   };
+  // danger rects, bounding box and the solution of every trap
+  for (const t of level.trolls) {
+    const tiles = dangerTiles(level, t);
+    if (!tiles.length) throw new Error(`level ${spec.id}: troll "${t.name}" has no dangerous tiles`);
+    t.danger = rectsOfTiles(tiles);
+    t.x = Math.min(...tiles.map(([x]) => x));
+    t.w = Math.max(...tiles.map(([x]) => x)) - t.x + 1;
+    const seg = segs.find((s) => s.troll === t.id);
+    t.solution = seg.win;
+    if (!t.hazards.length) delete t.hazards;
+  }
   // plans
-  const cpIdx = segs.findIndex((s) => s.fn === 'checkpoint');
+  const cpIdx = segs.map((s, i) => (s.fn === 'checkpoint' ? i : -1)).filter((i) => i >= 0);
   const steps = (from, to) => segs.slice(from, to).flatMap((s) => s.win);
-  const plans = { win: steps(0, segs.length), cp: steps(cpIdx + 1, segs.length), traps: {} };
+  const plans = { win: steps(0, segs.length), cps: cpIdx.map((i) => steps(i + 1, segs.length)), traps: {} };
   segs.forEach((s, i) => {
-    for (const [name, trap] of Object.entries(s.traps)) {
-      const afterCp = i > cpIdx;
-      plans.traps[name] = { cp: afterCp, steps: [...(afterCp ? steps(cpIdx + 1, i) : steps(0, i)), ...trap] };
-    }
+    if (!s.troll) return;
+    const t = level.trolls.find((x) => x.id === s.troll);
+    const prev = cpIdx.filter((c) => c < i);
+    const cp = prev.length ? prev.length - 1 : -1;
+    const from = cp >= 0 ? cpIdx[cp] + 1 : 0;
+    plans.traps[t.name] = {
+      id: t.id, type: t.type, cp,
+      solve: [...steps(from, i + 1), ['R', 's.grounded'], ['R', `s.x>=${(t.x + t.w) * 40 + 20}`]],
+      die: [...steps(from, i), ['R', 's.grounded'], ...s.die],
+    };
   });
-  return { level, plans, width: W, segs };
+  return { level, plans, width: W, segs, text };
 }
 
 // ---------------------------------------------------------------------------
-// The 10 levels. Each line is a segment; [fn, opts, label] puts a label at its start.
-
-const sky = { sky: true };
-const LEVELS = [
-  {
-    id: 1, slug: 'hello-floor', name: 'Hello, Floor', idea: 'The floor is not what it seems', winMessage: 'Welcome. Trust nothing.',
-    deathQuips: ['Oops!', 'The floor did that.', 'Ouch.', 'Hmm.'],
-    segments: [[S.start, { tutorial: true }], S.meadow, S.l1Sink, S.l1Fake, S.meadow, S.l1Collapse, S.checkpoint, S.l1Bridge, S.meadow,
-      S.l1Fake, S.l1Sink, S.l1Collapse, S.end],
-  },
-  {
-    id: 2, slug: 'greedy-blob', name: 'Greedy Little Blob', idea: '"Safe" coins are traps', winMessage: "Money isn't everything.",
-    deathQuips: ['Greedy!', 'That coin had teeth.', 'Shiny... ouch.', 'Worth it?'],
-    segments: [S.start, S.l2Routes, S.l2Bite, S.l2Arc, S.l2Cursed, S.checkpoint, S.l2Trail, S.l2Bite, S.l2Routes, S.l2Arc, S.l2Cursed, S.end],
-  },
-  {
-    id: 3, slug: 'spring-fever', name: 'Spring Fever', idea: 'Springs', winMessage: 'What goes up... gets spiked.',
-    deathQuips: ['Boing... ouch.', 'Too much spring!', 'Splat.', 'Whee— oh.'],
-    segments: [[S.start, sky], S.l3Ceiling, S.l3Dud, S.l3Hidden, [S.checkpoint, sky], S.l3Side, S.l3Hidden, S.l3Dud, [S.end, sky]],
-  },
-  {
-    id: 4, slug: 'heavy-ceiling', name: 'Heavy Ceiling', idea: 'Falling ceilings', winMessage: 'The scary spikes were the safe spot.', cave: 2,
-    deathQuips: ['Squish.', 'Pancake mode.', 'Flat.', 'Bonk.'],
-    segments: [S.start, S.l4Cave, S.l4Drop, S.l4Crusher, S.l4Thwomp, S.checkpoint, S.l4Tunnel, S.l4Thwomp, S.l4Drop, S.l4Cave, S.end],
-  },
-  {
-    id: 5, slug: 'left-is-right', name: 'Left Is Right', idea: 'The controls betray you', winMessage: 'Your fingers lied to you.',
-    deathQuips: ['Huh?!', 'Wrong way!', 'Not my fault!', 'Whoops.'],
-    segments: [S.start, S.l5Corridor, S.l5Swap, S.l5NoJump, S.checkpoint, S.l5AutoRun, S.l5Corridor, S.l5NoJump, S.l5Swap, S.l5AutoRun, S.end],
-  },
-  {
-    id: 6, slug: 'upside-downer', name: 'Upside Downer', idea: 'Gravity', winMessage: 'Which way is up?!',
-    deathQuips: ['Wrong way up!', 'Gravity says hi.', 'Floaty...', 'Heavy...'],
-    segments: [S.start, S.l6Dual, S.l6Flip, S.l6Low, S.checkpoint, S.l6Heavy, S.l6Low, S.l6Heavy, S.end],
-  },
-  {
-    id: 7, slug: 'too-many-doors', name: 'Too Many Doors', idea: 'The EXIT keeps changing its mind', winMessage: 'Wrong door. Right wall.',
-    deathQuips: ['NOPE!', 'That door bites.', 'Not that one!', 'Rude.'],
-    segments: [S.start, S.l7FakeExit, [S.l7Runaway, (b) => ({ to: b.at('swap') + 6 })], S.l7Wall, S.checkpoint, S.l7Wall,
-      [S.l7Swap, (b) => ({ to: b.at('end') + 8 }), 'swap'], S.l7FakeExit, S.l7Wall, S.l7Wall, [S.l7HiddenEnd, {}, 'end']],
-  },
-  {
-    id: 8, slug: 'screen-lies', name: 'Screen Lies', idea: 'The camera lies', winMessage: 'Seeing is NOT believing.',
-    deathQuips: ['Where did it go?', 'I saw nothing!', 'Lies!', 'Blind luck... none.'],
-    segments: [S.start, S.l8Freeze, S.l8Flip, S.l8Zoom, S.l8FakeClear, S.l8Flip, S.checkpoint, S.l8Zoom, S.l8FakeClear, S.l8Freeze, S.l8Flip, S.end],
-  },
-  {
-    id: 9, slug: 'run', name: 'Run!', idea: 'Something is always chasing you', winMessage: 'You outran everything.',
-    deathQuips: ['Too slow!', 'Caught!', 'RUN!', 'Faster...'],
-    segments: [S.start, S.l9Ball, S.l9Wall, S.l9Flood, S.l9Ball, S.checkpoint, S.l9Wall, S.l9Flood, S.l9Ball, S.l9Wall, S.end],
-  },
-  {
-    id: 10, slug: 'grand-betrayal', name: 'The Grand Betrayal', idea: 'Moving platforms betray you', winMessage: 'You out-trolled them all!',
-    deathQuips: ['Betrayed!', 'Not again...', 'Trust issues.', 'Almost!'],
-    segments: [[S.start, sky], S.l10Shuttle, S.l10Shy, S.l10Blink, S.l10Elevator, S.l10Shy, [S.checkpoint, sky], S.l10Shuttle, S.l10Elevator,
-      S.l10Blink, S.l10Shy, S.l10Shuttle, [S.end, sky]],
-  },
-];
 
 const only = process.argv.slice(2).map(Number);
+const specs = [];
+for (const f of readdirSync(join(dirname(fileURLToPath(import.meta.url)), 'levels')).filter((x) => /^L\d+\.mjs$/.test(x)).sort()) {
+  specs.push((await import(`./levels/${f}`)).default);
+}
 const dir = join(ROOT, 'src', 'levels');
-if (!only.length) for (const f of readdirSync(dir)) if (f.endsWith('.json')) unlinkSync(join(dir, f));
-const allPlans = {};
-for (const spec of LEVELS) {
+const planFile = join(ROOT, 'tests', 'plans.json');
+const enFile = join(ROOT, 'src', 'i18n', 'en.json');
+let allPlans = {};
+let en = {};
+if (only.length) {
+  try { allPlans = JSON.parse(readFileSync(planFile, 'utf8')); } catch { /* none yet */ }
+  try { en = JSON.parse(readFileSync(enFile, 'utf8')); } catch { /* none yet */ }
+} else for (const f of readdirSync(dir)) if (f.endsWith('.json')) unlinkSync(join(dir, f));
+Object.assign(en, JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'ui-en.json'), 'utf8')));
+for (const spec of specs.sort((a, b) => a.id - b.id)) {
   if (only.length && !only.includes(spec.id)) continue;
-  const { level, plans, width } = compile(spec);
+  // measure without fillers, then spread connectors so the level reaches its target width
+  const slots = spec.traps.length + 1;
+  const base = compile(spec, new Array(slots).fill(0)).width;
+  const deficit = Math.max(0, spec.minWidth - base);
+  const fillers = new Array(slots).fill(0);
+  if (deficit > 0) {
+    const open = [...Array(slots).keys()].filter((i) => !(Array.isArray(spec.traps[i]) && spec.traps[i][1]?.noFiller));
+    const per = Math.max(8, Math.ceil(deficit / open.length));
+    let left = deficit;
+    for (const i of open) { if (left <= 0) break; const w = Math.max(8, Math.min(per + ((i * 3) % 4), left < 8 ? 8 : left)); fillers[i] = w; left -= w; }
+  }
+  const { level, plans, width, text } = compile(spec, fillers);
+  for (const k of Object.keys(en)) if (k.startsWith(`L${spec.id}.`)) delete en[k];
+  Object.assign(en, text);
   const txt = JSON.stringify(level, null, 2)
     .replace(/\[\s+(-?[\d.]+),\s+(-?[\d.]+)\s+\]/g, '[$1, $2]')
-    .replace(/\[\s+(-?[\d.]+),\s+(-?[\d.]+),\s+(-?[\d.]+),\s+(-?[\d.]+)\s+\]/g, '[$1, $2, $3, $4]');
+    .replace(/\[\s+(-?[\d.]+),\s+(-?[\d.]+),\s+(-?[\d.]+),\s+(-?[\d.]+)\s+\]/g, '[$1, $2, $3, $4]')
+    .replace(/\[\s+"([LRJ]*)",\s+("(?:[^"\\]|\\.)*"|-?\d+)\s+\]/g, '[$1$2]'.replace('$1', '"$1", '));
   writeFileSync(join(dir, `${String(spec.id).padStart(2, '0')}-${spec.slug}.json`), txt + '\n');
   allPlans[spec.id] = plans;
-  console.log(`level ${spec.id} "${spec.name}": ${width} tiles, ${level.trolls.length} trolls`);
+  console.log(`level ${spec.id} "${spec.name}": ${width} tiles (min ${spec.minWidth}), ${level.trolls.length} traps, ${plans.cps.length} checkpoints`);
 }
-// every trap type may belong to one level only
+// every trap type belongs to one level
 const owner = {};
 for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) {
-  const L = JSON.parse((await import('node:fs')).readFileSync(join(dir, f), 'utf8'));
+  const L = JSON.parse(readFileSync(join(dir, f), 'utf8'));
   for (const t of L.trolls) {
-    if (owner[t.type] !== undefined && owner[t.type] !== L.id) throw new Error(`trap type "${t.type}" used by levels ${owner[t.type]} and ${L.id}`);
+    if (owner[t.type] !== undefined) throw new Error(`trap type "${t.type}" used twice (levels ${owner[t.type]} and ${L.id})`);
     owner[t.type] = L.id;
   }
 }
-const planFile = join(ROOT, 'tests', 'plans.json');
-let existing = {};
-try { existing = only.length ? JSON.parse((await import('node:fs')).readFileSync(planFile, 'utf8')) : {}; } catch { /* none yet */ }
-writeFileSync(planFile, JSON.stringify({ ...existing, ...allPlans }, null, 1) + '\n');
+const sorted = Object.fromEntries(Object.keys(en).sort().map((k) => [k, en[k]]));
+writeFileSync(enFile, JSON.stringify(sorted, null, 2) + '\n');
+writeFileSync(planFile, JSON.stringify(allPlans, null, 1) + '\n');

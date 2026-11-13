@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import { TILE, ROWS, WORLD_W, WORLD_H, PHYS, DT, TICK_MS, RESTART_TICKS, PALETTES, Palette } from '../config';
 import { LEVELS } from '../levels';
-import type { LevelData, GroupDef, TriggerDef, Action, TileChar } from '../levels/schema';
+import type { LevelData, GroupDef, TriggerDef, Action, TileChar, CtrlMode, CameraTrick } from '../levels/schema';
+import { isGroupChar } from '../levels/schema';
+import { t } from '../i18n';
+import { openLanguagePicker, currentLangName } from '../langPicker';
 import { drawTerrain, addTerrainTexture, makeTerrainTileset, maskAt, RES, TILESET_PAD } from '../art';
 import { Hero } from '../game/Hero';
 import { Door } from '../game/Door';
@@ -9,11 +12,21 @@ import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
 import { applyLayout, Layout } from '../layout';
-import { Button, label, panel, bubble } from '../ui';
+import { Button, label, panel, bubble, fitText } from '../ui';
 
 type Dir = 'up' | 'down' | 'left' | 'right';
 const SPIKE_DIR: Record<string, Dir> = { '^': 'up', v: 'down', '<': 'left', '>': 'right' };
 const SPIKE_ROT: Record<Dir, number> = { up: 0, down: Math.PI, left: -Math.PI / 2, right: Math.PI / 2 };
+/** Input-lag trap: keys arrive this many ticks late. */
+const LAG_TICKS = 18;
+/** Hiccup trap: an involuntary hop every N ticks while on the ground. */
+const HICCUP_TICKS = 60;
+/** Hiccup hop strength (fraction of a full jump; it cannot be cut short). */
+const HICCUP_VEL = 0.62;
+/** Super-jump trap: jump strength multiplier. */
+const SUPERJUMP = 1.5;
+/** Shadow clone / homing / frog / storm hit radius (px). */
+const HIT_R = 20;
 
 interface R { x: number; y: number; w: number; h: number }
 const overlap = (a: R, b: R) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -58,9 +71,26 @@ interface GroupRT {
   deadlyMove: boolean;
   /** A deadly move just finished: still deadly for this one tick (the landing frame). */
   deadlyEnd: boolean;
+  /** Behaviours: ballistic toss, eaten-from-the-left, activated (homing/frog/turret), … */
+  toss: { vx: number; vy: number } | null;
+  eatX: number | null;
+  eatSpeed: number;
+  active: boolean;
+  frogVy: number;
+  frogAir: boolean;
+  turretT: number;
+  revealed: boolean;
+  padCount: number;
+  /** Pixel centre of the group's tiles as drawn in the map. */
+  cx: number;
+  cy: number;
+  img: Phaser.GameObjects.Image | null;
+  minTx: number;
 }
 
-interface TriggerRT { def: TriggerDef; fired: boolean }
+interface Shot { x: number; y: number; vx: number; left: number; img: Phaser.GameObjects.Image }
+
+interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean }
 
 export interface Snapshot {
   level: number;
@@ -77,6 +107,9 @@ export interface Snapshot {
   lastDeath: string;
   trolls: string[];
   checkpoint: boolean;
+  /** Index of the active checkpoint (-1: none yet). */
+  cpIdx: number;
+  cpCount: number;
   worldW: number;
   controlsFlipped: boolean;
   hudDeaths: string;
@@ -92,6 +125,13 @@ export interface Snapshot {
   cpX: number;
   zoom: number;
   viewTiles: number;
+  /** Hero is outside the visible area and the edge arrow shows where he is. */
+  arrow: boolean;
+  gravX: number;
+  cam: string;
+  /** Distance to the nearest projectile ahead (px). */
+  shot: number;
+  roofed: boolean;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -143,7 +183,7 @@ export class GameScene extends Phaser.Scene {
   private pads: Pad[] = [];
   private groups = new Map<string, GroupRT>();
   private triggers: TriggerRT[] = [];
-  private scheduled: { at: number; actions: Action[]; every?: number; repeat?: boolean }[] = [];
+  private scheduled: { at: number; actions: Action[]; every?: number; repeat?: boolean; stopAt?: number }[] = [];
   /** World x of every death in this level (hints appear near where you keep dying). */
   private deathXs: number[] = [];
   private fired = new Set<string>();
@@ -153,15 +193,27 @@ export class GameScene extends Phaser.Scene {
   /** Level width in tiles / pixels (levels scroll horizontally). */
   cols = 32;
   worldW = WORLD_W;
-  private cp: { x: number; y: number; tx: number } | null = null;
-  /** Checkpoint reached in this attempt series: deaths respawn there. */
-  cpActive = false;
-  private cpFlag: Phaser.GameObjects.Image | null = null;
+  /** All checkpoint flags, left to right. */
+  private cps: { x: number; y: number; tx: number }[] = [];
+  /** Index of the checkpoint reached in this attempt series (-1: none): deaths respawn there. */
+  cpIdx = -1;
+  private cpFlags: Phaser.GameObjects.Image[] = [];
   /** Troll ids that have fired at least once since the level was entered. */
   trollsFired = new Set<string>();
   private ctrlFlip = false;
   /** Control mode set by traps: normal, swapped, jump disabled, or forced running. */
-  private ctrlMode: 'normal' | 'flip' | 'nojump' | 'autorun' = 'normal';
+  private ctrlMode: CtrlMode = 'normal';
+  /** Delayed inputs for the "input lag" trap. */
+  private lagQ: { left: boolean; right: boolean; jump: boolean }[] = [];
+  /** Sideways pull (px/s²). */
+  private gravX = 0;
+  /** The hero started a jump this tick (copycat frog). */
+  private jumpedNow = false;
+  /** Shadow clone: replays the hero's path `delay` ticks later. */
+  private clone: { delay: number; path: { x: number; y: number }[]; img: Hero | null } | null = null;
+  /** Storm cloud that follows the hero and strikes. */
+  private storm: { every: number; warn: number; x: number; t: number; strikeX: number; strikeT: number; cloud: Phaser.GameObjects.Image; bolt: Phaser.GameObjects.Image } | null = null;
+  private shots: Shot[] = [];
   /** Gravity strength multiplier (low / heavy gravity traps). */
   private gScale = 1;
   /** Ticks during which air control is off after a sideways spring. */
@@ -171,6 +223,16 @@ export class GameScene extends Phaser.Scene {
   private baseZoom = 1;
   private camFlip = false;
   private camZoomMul = 1;
+  private camDark = false;
+  private camStrobe = false;
+  private camSmudge = false;
+  private camBack = false;
+  private camSeasick = false;
+  private camDecoy: string | null = null;
+  private darkImg: Phaser.GameObjects.Image | null = null;
+  private smudgeImg: Phaser.GameObjects.Image | null = null;
+  private arrowImg: Phaser.GameObjects.Image | null = null;
+  private arrowOn = false;
   private fakeClearUI: Phaser.GameObjects.Container | null = null;
   /** Group the hero is standing on (moving platforms carry the hero). */
   private ride: GroupRT | null = null;
@@ -213,10 +275,10 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean }): void {
+  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean | number; hintUsed?: boolean }): void {
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
-    this.cpActive = !!data.checkpoint;
-    this.hintUsed = false;
+    this.cpIdx = data.checkpoint === true ? 0 : typeof data.checkpoint === 'number' ? data.checkpoint : -1;
+    this.hintUsed = !!data.hintUsed;
     this.hintShown = null;
     this.hintBox = null;
     this.touches = new Map();
@@ -247,6 +309,16 @@ export class GameScene extends Phaser.Scene {
     this.bubbles = [];
     this.sysButtons = [];
     this.touchBtns = [];
+    // per-run objects (a scene restart destroys their images)
+    this.storm = null;
+    this.clone = null;
+    this.shots = [];
+    this.darkImg = null;
+    this.smudgeImg = null;
+    this.arrowImg = null;
+    this.fakeClearUI = null;
+    this.cps = [];
+    this.cpFlags = [];
   }
 
   create(): void {
@@ -383,16 +455,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Camera tricks used by the "the camera lies" traps (presentation only). */
-  private cameraTrick(t: 'freeze' | 'follow' | 'flip' | 'unflip' | 'zoom' | 'unzoom' | 'reset'): void {
+  private cameraTrick(t: CameraTrick | 'reset', target?: string): void {
     const cam = this.cameras.main;
     if (t === 'reset') {
       this.camFrozen = false;
       this.camFlip = false;
       this.camZoomMul = 1;
+      this.camDark = this.camStrobe = this.camSmudge = this.camBack = this.camSeasick = false;
+      this.camDecoy = null;
       this.tweens.killTweensOf(cam);
       cam.setRotation(0);
       return;
     }
+    if (t === 'dark' || t === 'light') this.camDark = t === 'dark';
+    if (t === 'strobe' || t === 'unstrobe') this.camStrobe = t === 'strobe';
+    if (t === 'smudge' || t === 'unsmudge') this.camSmudge = t === 'smudge';
+    if (t === 'back' || t === 'front') this.camBack = t === 'back';
+    if (t === 'seasick' || t === 'steady') { this.camSeasick = t === 'seasick'; if (!this.camSeasick) cam.setRotation(this.camFlip ? Math.PI : 0); }
+    if (t === 'decoy') this.camDecoy = target ?? null;
+    if (t === 'undecoy') this.camDecoy = null;
+    if (t !== 'freeze' && t !== 'follow' && t !== 'flip' && t !== 'unflip' && t !== 'zoom' && t !== 'unzoom') return;
     if (t === 'freeze') this.camFrozen = true;
     if (t === 'follow') this.camFrozen = false;
     if (t === 'flip' || t === 'unflip') {
@@ -412,13 +494,14 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.fakeClearUI) return;
-    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    // looks like the real card, but sits high so the hero always stays visible
+    const cx = WORLD_W / 2, cy = 190;
     const c = this.add.container(0, 0).setDepth(180);
-    c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
-    c.add(label(this, cx, cy - 130, `LEVEL ${this.levelNum} CLEAR`, 30, '#6fd36b', 7));
-    c.add(label(this, cx, cy - 64, 'Too easy!', 46, '#ffd23f', 10));
-    c.add(label(this, cx, cy + 10, `Deaths this level: ${this.deathsLevel}`, 28, '#ffffff', 7));
-    const nx = new Button(this, cx + 150, cy + 130, { w: 190, h: 72, icon: 'play', text: 'Next', fontSize: 30, color: '#6fd36b' }, () => this.say('lol', 'hero', 40));
+    c.add(panel(this, cx, cy, 600, 250, 0xfff6d5));
+    c.add(fitText(label(this, cx, cy - 80, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 560));
+    c.add(fitText(label(this, cx, cy - 26, t('ui.fakeClear'), 46, '#ffd23f', 10), 560));
+    c.add(fitText(label(this, cx, cy + 26, t('ui.deathsLevel', { n: this.deathsLevel }), 26, '#ffffff', 7), 560));
+    const nx = new Button(this, cx + 170, cy + 82, { w: 190, h: 60, icon: 'play', text: t('ui.next'), fontSize: 28, color: '#6fd36b' }, () => this.say('say.lol', 'hero', 40));
     c.add(nx);
     this.uiLayer.add(c);
     this.cameras.main.ignore([c, nx]);
@@ -440,7 +523,7 @@ export class GameScene extends Phaser.Scene {
     this.deathIcon = this.add.image(WORLD_W / 2 - 34, 34, 'skull').setScale(1.15 / RES);
     this.deathText = label(this, WORLD_W / 2 + 8, 34, '0', 40, '#fff6d5', 9).setOrigin(0, 0.5);
     this.quip = label(this, WORLD_W / 2, 84, '', 26, '#ffd23f', 7).setAlpha(0);
-    this.levelText = label(this, 24, 30, `${this.levelNum}. ${this.lvl.name}`, 22, '#fff6d5', 6).setOrigin(0, 0.5);
+    this.levelText = label(this, 24, 30, `${this.levelNum}. ${t(this.lvl.name)}`, 22, '#fff6d5', 6).setOrigin(0, 0.5);
     this.hud.add([this.deathIcon, this.deathText, this.quip, this.levelText]);
     this.uiLayer.add(this.hud);
     const mk = (icon: string, fn: () => void, color = '#5b8cff') => {
@@ -452,6 +535,7 @@ export class GameScene extends Phaser.Scene {
       return b;
     };
     this.hintBtn = mk('bulb', () => this.useHint(), '#f2b705');
+    if (this.hintUsed) { this.hintBtn.enabled = false; this.hintBtn.setAlpha(0.35); }
     mk('restart', () => this.restartLevel(), '#ff6a3d');
     this.muteBtn = mk(Audio.muted ? 'mute' : 'sound', () => this.toggleMute());
     mk('pause', () => this.togglePause());
@@ -646,7 +730,13 @@ export class GameScene extends Phaser.Scene {
     this.fakeWalls = [];
     this.hints = [];
     this.door = null;
-    this.cpFlag = null;
+    this.cpFlags = [];
+    for (const sh of this.shots) sh.img.destroy();
+    this.shots = [];
+    this.clone?.img?.destroy();
+    this.clone = null;
+    if (this.storm) { this.storm.cloud.destroy(); this.storm.bolt.destroy(); }
+    this.storm = null;
   }
 
   private track<T extends Phaser.GameObjects.GameObject>(o: T): T {
@@ -667,7 +757,7 @@ export class GameScene extends Phaser.Scene {
     const COLS = this.cols;
     let doorAt: { tx: number; ty: number } | null = null;
     const fakeAt: { tx: number; ty: number }[] = [];
-    let cpAt: { tx: number; ty: number } | null = null as { tx: number; ty: number } | null;
+    const cpAt: { tx: number; ty: number }[] = [];
     const spikeTiles: { tx: number; ty: number; ch: string }[] = [];
     const padTiles: { tx: number; ty: number }[] = [];
     const coinTiles: { tx: number; ty: number }[] = [];
@@ -685,8 +775,8 @@ export class GameScene extends Phaser.Scene {
         else if (ch === 'P') this.spawn = { x: tx * TILE + TILE / 2, y: (ty + 1) * TILE };
         else if (ch === 'D') doorAt = { tx, ty };
         else if (ch === 'F') fakeAt.push({ tx, ty });
-        else if (ch === 'C') cpAt = { tx, ty };
-        else if (ch >= 'a' && ch <= 'z') {
+        else if (ch === 'C') cpAt.push({ tx, ty });
+        else if (isGroupChar(ch)) {
           if (!groupTiles.has(ch)) groupTiles.set(ch, []);
           groupTiles.get(ch)!.push({ tx, ty });
           const d = gdefs[ch];
@@ -753,6 +843,8 @@ export class GameScene extends Phaser.Scene {
       if (!def) throw new Error(`Level ${L.id}: group '${id}' used in map but not defined`);
       this.makeGroup(id, def, tiles, isSolidAll);
     }
+    // groups drawn only through `cover` tiles (e.g. on top of another group's tile)
+    for (const [id, def] of Object.entries(gdefs)) if (!groupTiles.has(id) && def.cover?.length) this.makeGroup(id, def, [], isSolidAll);
 
     // Plain spikes / pads / coins
     for (const s of spikeTiles) this.addSpike(s.tx, s.ty, SPIKE_DIR[s.ch], null);
@@ -777,19 +869,27 @@ export class GameScene extends Phaser.Scene {
     this.doorWait = 0;
     this.doorVx = 0;
 
-    // Checkpoint
-    this.cp = cpAt ? { x: cpAt.tx * TILE + TILE / 2, y: (cpAt.ty + 1) * TILE, tx: cpAt.tx } : null;
-    if (this.cp) {
-      this.cpFlag = this.track(this.add.image(this.cp.x - 1, this.cp.y + 1, this.cpActive ? 'flag-on' : 'flag').setOrigin(12 / 40, 79 / 80).setScale(1 / RES).setDepth(1));
+    // Decorations: anti-gravity bubbles
+    for (const d of L.decor ?? []) {
+      const g = this.track(this.add.graphics().setDepth(4.8));
+      g.fillStyle(0x9ef0ff, 0.22).fillRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
+      g.lineStyle(4, 0xe6fdff, 0.7).strokeRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
+      for (let i = 0; i < d.w * 2; i++) g.fillStyle(0xffffff, 0.5).fillCircle(d.x * TILE + 20 + i * 20, d.y * TILE + 30 + ((i * 53) % (d.h * TILE - 60)), 4 + (i % 3) * 2);
+      this.tweens.add({ targets: g, alpha: 0.7, duration: 900, yoyo: true, repeat: -1 });
     }
+
+    // Checkpoints (one after every three traps)
+    this.cps = cpAt.sort((a, b) => a.tx - b.tx).map((c) => ({ x: c.tx * TILE + TILE / 2, y: (c.ty + 1) * TILE, tx: c.tx }));
+    if (this.cpIdx >= this.cps.length) this.cpIdx = this.cps.length - 1;
+    this.cpFlags = this.cps.map((c, i) => this.track(this.add.image(c.x - 1, c.y + 1, i <= this.cpIdx ? 'flag-on' : 'flag').setOrigin(12 / 40, 79 / 80).setScale(1 / RES).setDepth(1)));
 
     // Hints
     // Only the level-1 control instructions exist, and they are shown once ever.
     this.tutorialMaxX = 0;
     if (!Save.get().tutorialSeen) {
       for (const h of L.hints ?? []) {
-        const t = this.track(label(this, h.x * TILE + TILE / 2, h.y * TILE + TILE / 2, h.text, 24, '#ffffff', 6).setDepth(-5));
-        this.hints.push({ obj: t, after: 0 });
+        const tx = this.track(label(this, h.x * TILE + TILE / 2, h.y * TILE + TILE / 2, t(h.text), 24, '#ffffff', 6).setDepth(-5));
+        this.hints.push({ obj: tx, after: 0 });
         this.tutorialMaxX = Math.max(this.tutorialMaxX, (h.x + 4) * TILE);
       }
     }
@@ -799,11 +899,14 @@ export class GameScene extends Phaser.Scene {
     this.ctrlFlip = false;
     this.ctrlMode = 'normal';
     this.gScale = 1;
+    this.gravX = 0;
+    this.lagQ = [];
     this.launchLock = 0;
     this.ride = null;
     this.cameraTrick('reset');
     this.showFakeClear(false);
-    const start = this.cpActive && this.cp ? { x: this.cp.x + 2, y: this.cp.y } : this.spawn;
+    const cp = this.cpIdx >= 0 ? this.cps[this.cpIdx] : null;
+    const start = cp ? { x: cp.x + 2, y: cp.y } : this.spawn;
     this.player = this.track(this.add.zone(start.x, start.y - PHYS.bodyH / 2, PHYS.bodyW, PHYS.bodyH));
     this.physics.add.existing(this.player);
     this.pbody = this.player.body as Phaser.Physics.Arcade.Body;
@@ -823,13 +926,13 @@ export class GameScene extends Phaser.Scene {
     this.triggers = (L.triggers ?? []).map((def) => ({ def, fired: false }));
     // Respawning at the checkpoint: everything is re-armed, except "keep" triggers that
     // lie before the flag (e.g. the door already ran ahead) – their end state is applied.
-    if (this.cpActive && this.cp) {
-      for (const t of this.triggers) {
-        const z = t.def.when.zone;
-        if (t.def.keep && z && z[0] + z[2] <= this.cp.tx) {
-          t.fired = true;
-          if (t.def.id) this.fired.add(t.def.id);
-          this.fastForward(t.def.do);
+    if (cp) {
+      for (const tr of this.triggers) {
+        const z = tr.def.when.zone;
+        if (tr.def.keep && z && z[0] + z[2] <= cp.tx) {
+          tr.fired = true;
+          if (tr.def.id) this.fired.add(tr.def.id);
+          this.fastForward(tr.def.do);
         }
       }
     }
@@ -889,7 +992,12 @@ export class GameScene extends Phaser.Scene {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
+      toss: null, eatX: null, eatSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
+      cx: 0, cy: 0, img: null, minTx: 0,
     };
+    g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
+    g.cy = ((Math.min(...tiles.map((v) => v.ty)) + Math.max(...tiles.map((v) => v.ty)) + 1) / 2) * TILE;
+    g.minTx = Math.min(...tiles.map((v) => v.tx));
     this.groups.set(id, g);
     const t = def.tile as TileChar;
     if (t === '#') {
@@ -904,9 +1012,16 @@ export class GameScene extends Phaser.Scene {
       }
       const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
       container.add(img);
+      g.img = img;
       container.setDepth(def.fake ? 6 : 0.5);
+      if (def.ice) img.setTint(0xbfe9ff);
+      if (def.tint) img.setTint(def.tint);
+      if (def.invisible) img.setAlpha(0);
+      if (def.conveyor) this.addConveyorArrows(container, tiles, def.conveyor);
+      if (def.turret) container.add(this.add.image(minX * TILE + 4, (minY + maxY + 1) / 2 * TILE, 'turret-mouth').setScale(1 / RES));
       if (!def.fake) {
-        for (const r of mergeRects(tiles)) {
+        const rects = def.columns ? [...new Set(tiles.map((v) => v.tx))].flatMap((cx) => mergeRects(tiles.filter((v) => v.tx === cx))) : mergeRects(tiles);
+        for (const r of rects) {
           const z = this.add.zone(r.x * TILE + (r.w * TILE) / 2, r.y * TILE + (r.h * TILE) / 2, r.w * TILE, r.h * TILE);
           this.dyn.add(z);
           const b = z.body as Phaser.Physics.Arcade.Body;
@@ -931,6 +1046,14 @@ export class GameScene extends Phaser.Scene {
     } else if (t === '*') {
       container.setDepth(3);
       for (const v of tiles) this.addBall(v.tx, v.ty, g);
+      if (def.frog) for (const b of this.balls) if (b.group === g) b.img.setTexture('frog');
+      if (def.homing) for (const b of this.balls) if (b.group === g) b.img.setTexture('bird');
+    } else if (t === 'H') {
+      container.setDepth(4);
+      const h = new Hero(this, g.cx, (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE);
+      h.setAlpha(0.95);
+      container.add(h);
+      container.setData('hero', h);
     } else if (t === 'F') {
       container.setDepth(2);
       for (const v of tiles) {
@@ -941,6 +1064,16 @@ export class GameScene extends Phaser.Scene {
       }
     }
     container.setVisible(g.visible);
+  }
+
+  /** Animated chevrons on a conveyor belt. */
+  private addConveyorArrows(c: Phaser.GameObjects.Container, tiles: { tx: number; ty: number }[], speed: number): void {
+    const tops = tiles.filter((v) => !tiles.some((u) => u.tx === v.tx && u.ty === v.ty - 1));
+    for (const v of tops) {
+      const img = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + 9, 'chevron').setScale(1 / RES).setFlipX(speed < 0);
+      c.add(img);
+      this.tweens.add({ targets: img, x: img.x + Math.sign(speed) * 14, alpha: { from: 1, to: 0.35 }, duration: 420, repeat: -1 });
+    }
   }
 
   private addSpike(tx: number, ty: number, dir: Dir, group: GroupRT | null): void {
@@ -1007,7 +1140,12 @@ export class GameScene extends Phaser.Scene {
   /** One deterministic 1/60 s simulation step. */
   fixedTick(): void {
     this.tick++;
-    const k = this.replay ? (this.replay[this.levelTick] ?? { left: false, right: false, jump: false }) : Input.read();
+    let k = this.replay ? (this.replay[this.levelTick] ?? { left: false, right: false, jump: false }) : Input.read();
+    if (this.ctrlMode === 'lag' && this.state === 'play') {
+      // input lag: every key press arrives LAG ticks late
+      this.lagQ.push({ left: k.left, right: k.right, jump: k.jump });
+      k = this.lagQ.length > LAG_TICKS ? this.lagQ.shift()! : { left: false, right: false, jump: false };
+    } else this.lagQ = [];
     const jumpPressed = k.jump && !this.prevJump;
     this.prevJump = k.jump;
     if (this.slowmo > 0) { this.slowmo--; if (this.slowmo === 0) this.applySlowmo(); }
@@ -1054,29 +1192,48 @@ export class GameScene extends Phaser.Scene {
     let vx = b.velocity.x;
     let vy = b.velocity.y;
     let dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
-    if (this.ctrlMode === 'flip') dir = -dir;
-    if (this.ctrlMode === 'autorun') dir = 1;
-    if (this.ctrlMode === 'nojump') jumpPressed = false;
+    const mode = this.ctrlMode;
+    if (mode === 'flip') dir = -dir;
+    if (mode === 'autorun') dir = 1;
+    if (mode === 'nojump') jumpPressed = false;
     const gr = this.grounded;
-    if (this.launchLock > 0) {
+    const hic = mode === 'hiccup' && gr && this.levelTick % HICCUP_TICKS === 0; // hic!
+    if (hic) jumpPressed = true;
+    if (mode === 'flipjump') {
+      // the jump key flips gravity instead of jumping
+      if (jumpPressed && gr) this.runActions([{ gravity: 'flip' }], true);
+      jumpPressed = false;
+    }
+    this.jumpedNow = false;
+    // sideways pull and conveyor belts shift the speed you settle at
+    const belt = gr && this.ride?.def.conveyor ? this.ride.def.conveyor : 0;
+    const bias = this.gravX + belt;
+    const grip = gr && this.ride?.def.ice ? 0.05 : 1;
+    const maxRun = mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun;
+    const accMul = (mode === 'turbo' ? 2 : 1) * grip;
+    if (mode === 'frozen') {
+      jumpPressed = false; // no control at all, and you keep sliding
+    } else if (this.launchLock > 0) {
       this.launchLock--;
     } else if (dir !== 0) {
-      const turning = vx !== 0 && Math.sign(vx) !== dir;
+      const turning = vx !== bias && Math.sign(vx - bias) !== dir;
       const a = gr ? (turning ? PHYS.groundDecel : PHYS.groundAccel) : PHYS.airAccel;
-      vx = approach(vx, dir * PHYS.maxRun, a * DT);
+      vx = approach(vx, dir * maxRun + bias, a * accMul * DT);
     } else {
-      vx = approach(vx, 0, (gr ? PHYS.groundDecel : PHYS.airDecel) * DT);
+      vx = approach(vx, bias, (gr ? PHYS.groundDecel : PHYS.airDecel) * accMul * DT);
     }
     if (jumpPressed) this.buffer = PHYS.bufferTicks;
     if (gr) this.coyote = PHYS.coyoteTicks;
     if (this.buffer > 0 && this.coyote > 0) {
-      vy = -PHYS.jumpVel * g;
+      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * g;
+      this.jumpedNow = true;
       this.jumping = true;
       this.coyote = 0;
       this.buffer = 0;
       this.hero.jump();
       this.dust(4);
       this.sfx('jump');
+      if (hic) { this.jumping = false; this.buffer = 0; } // a hiccup hop has a fixed height
     }
     if (this.buffer > 0) this.buffer--;
     if (!gr && this.coyote > 0) this.coyote--;
@@ -1102,8 +1259,9 @@ export class GameScene extends Phaser.Scene {
         if (!g.solid || !g.visible || !g.bodies.length) continue;
         for (const z of g.bodies) {
           const zb = z.body as Phaser.Physics.Arcade.Body;
+          if (!zb.enable) continue;
           const touching = this.gdir > 0 ? Math.abs(b.bottom - zb.top) <= 3 : Math.abs(b.top - zb.bottom) <= 3;
-          if (touching && b.right > zb.left + 1 && b.left < zb.right - 1) { this.ride = g; break; }
+          if (touching && b.right > zb.left && b.left < zb.right) { this.ride = g; break; }
         }
         if (this.ride) break;
       }
@@ -1135,7 +1293,7 @@ export class GameScene extends Phaser.Scene {
         // fake spikes: squash flat, harmless
         if (s.img.scaleY > 0.4 / RES) {
           this.tweens.add({ targets: s.img, scaleY: 0.25 / RES, duration: 90, ease: 'Quad.Out' });
-          if (!this.trollsFired.has(s.group.def.troll ?? '#')) { this.say('fake!', 'hero', 45); this.sfx('pad'); }
+          if (!this.trollsFired.has(s.group.def.troll ?? '#')) { this.say('say.fake', 'hero', 45); this.sfx('pad'); }
           this.troll(s.group.def.troll);
         }
         continue;
@@ -1188,21 +1346,23 @@ export class GameScene extends Phaser.Scene {
       if (p.squashT > 0) p.squashT--;
       if (overlap(big, r) && this.pbody.velocity.y * this.gdir >= 0) {
         const def = p.group?.def;
+        if (def?.minFall !== undefined && this.lastVy * this.gdir < def.minFall) continue; // rubber floor: only a landing bounces
         if (def?.dud) {
           // a dud: squeaks, does nothing
           if (p.squashT === 0) {
             this.troll(def.troll);
             p.img.setTexture('pad-dud-squash');
             this.time.delayedCall(140, () => p.img.active && p.img.setTexture('pad-dud'));
-            this.say('...boing?', 'hero', 40);
+            this.say('say.boing', 'hero', 40);
             this.sfx('click');
           }
           p.squashT = 20;
           continue;
         }
-        const lv = def?.launch ?? [0, -PHYS.padVel];
+        let lv = def?.launch ?? [0, -PHYS.padVel];
+        if (def?.stack && p.group) { lv = [0, -def.stack[Math.min(p.group.padCount, def.stack.length - 1)]]; p.group.padCount++; }
         this.pbody.setVelocity(lv[0] !== 0 ? lv[0] : this.pbody.velocity.x, lv[1] * this.gdir);
-        if (lv[0] !== 0) this.launchLock = 30;
+        this.launchLock = def?.lock ?? (lv[0] !== 0 ? 30 : 0);
         this.jumping = false;
         this.grounded = false;
         this.coyote = 0;
@@ -1226,12 +1386,40 @@ export class GameScene extends Phaser.Scene {
     // fake doors bite
     for (const f of this.fakeDoors) {
       if (f.group && !f.group.visible) continue;
+      if (f.group?.def.prop) continue;
       const fx = f.x + (f.group ? f.group.ox : 0), fy = f.y + (f.group ? f.group.oy : 0);
       const r = { x: fx - 14, y: f.flipped ? fy : fy - 64, w: 28, h: 64 };
       if (overlap(pr, r)) {
+        const def = f.group?.def;
+        this.troll(def?.troll ?? this.lvl.fakeExits?.[String(Math.round((f.x - TILE / 2) / TILE))] ?? this.lvl.fakeExitTroll);
+        if (def?.kick) {
+          // a kicking door: boots you away (it does not bite)
+          if (this.launchLock === 0) {
+            f.door.chomp();
+            this.pbody.setVelocity(def.kick[0], def.kick[1] * this.gdir);
+            this.launchLock = 24;
+            this.jumping = false;
+            this.grounded = false;
+            this.coyote = 0;
+            this.hero.launch();
+            this.say('say.kick', [fx / TILE - 0.5, fy / TILE - 3.2], 45);
+            this.sfx('pad');
+          }
+          continue;
+        }
+        if (def?.warp) {
+          // a warp door: sends you somewhere else (usually back)
+          const v = { x: this.pbody.velocity.x, y: this.pbody.velocity.y };
+          this.player.setPosition(def.warp[0] * TILE + TILE / 2, (def.warp[1] + 1) * TILE - PHYS.bodyH / 2);
+          this.pbody.reset(this.player.x, this.player.y);
+          this.pbody.setVelocity(v.x, v.y);
+          this.say('say.warp', 'hero', 50);
+          this.sfx('flip');
+          this.cameras.main.flash(160, 255, 255, 255, false);
+          continue;
+        }
         f.door.chomp();
-        this.troll(f.group?.def.troll ?? this.lvl.fakeExits?.[String(Math.round((f.x - TILE / 2) / TILE))] ?? this.lvl.fakeExitTroll);
-        this.say('NOPE!', [f.x / TILE - 0.5, f.y / TILE - 3.2], 50);
+        this.say('say.nope', [fx / TILE - 0.5, fy / TILE - 3.2], 50);
         this.sfx('chomp');
         this.kill('fakedoor');
         return;
@@ -1251,15 +1439,33 @@ export class GameScene extends Phaser.Scene {
       g.container.setAlpha(inside ? 0.45 : 1);
       if (inside) this.troll(g.def.troll);
     }
-    // checkpoint flag
-    if (this.cp && !this.cpActive && overlap(big, { x: this.cp.x - 20, y: this.cp.y - 80, w: 40, h: 80 })) {
-      this.cpActive = true;
-      this.cpFlag?.setTexture('flag-on');
-      if (this.cpFlag) this.tweens.add({ targets: this.cpFlag, scaleX: 1.25 / RES, scaleY: 1.25 / RES, duration: 120, yoyo: true });
-      this.emitConfetti.emitParticleAt(this.cp.x, this.cp.y - 60, 16);
-      this.say('checkpoint!', 'hero', 60);
-      this.sfx('coin');
+    // invisible blocks show themselves once you touch them
+    if (this.ride && this.ride.def.invisible && !this.ride.revealed) {
+      const g = this.ride;
+      g.revealed = true;
+      this.troll(g.def.troll);
+      if (g.img) this.tweens.add({ targets: g.img, alpha: 0.55, duration: 200 });
     }
+    // projectiles
+    for (const sh of this.shots) if (Math.abs(sh.x - this.pbody.center.x) < HIT_R && Math.abs(sh.y - this.pbody.center.y) < HIT_R) { this.kill('shot'); return; }
+    // shadow clone
+    if (this.clone && this.clone.path.length > this.clone.delay) {
+      const c = this.clone.path[this.clone.path.length - 1 - this.clone.delay];
+      if (Math.abs(c.x - this.pbody.center.x) < HIT_R && Math.abs(c.y - this.pbody.center.y) < HIT_R + 4) { this.kill('clone'); return; }
+    }
+    // lightning (a roof over your head keeps you safe)
+    if (this.storm && this.storm.strikeT > 0 && Math.abs(this.storm.strikeX - this.pbody.center.x) < HIT_R + 4 && !this.roofed()) { this.kill('storm'); return; }
+    // checkpoint flags: the furthest one touched is where you respawn
+    this.cps.forEach((c, i) => {
+      if (i <= this.cpIdx || !overlap(big, { x: c.x - 20, y: c.y - 80, w: 40, h: 80 })) return;
+      this.cpIdx = i;
+      for (let j = 0; j <= i; j++) this.cpFlags[j]?.setTexture('flag-on');
+      const fl = this.cpFlags[i];
+      if (fl) this.tweens.add({ targets: fl, scaleX: 1.25 / RES, scaleY: 1.25 / RES, duration: 120, yoyo: true });
+      this.emitConfetti.emitParticleAt(c.x, c.y - 60, 16);
+      this.say('say.checkpoint', 'hero', 60);
+      this.sfx('coin');
+    });
   }
 
   /** Spend the level's one hint: describe (and highlight) the next trap ahead of the hero. */
@@ -1269,30 +1475,61 @@ export class GameScene extends Phaser.Scene {
     this.hintBtn.enabled = false;
     this.hintBtn.setAlpha(0.35);
     const hx = this.pbody.center.x / TILE;
-    const next = (this.lvl.trolls ?? []).filter((t) => t.x + t.w > hx - 0.5).sort((a, b) => a.x - b.x)[0];
-    const text = next ? next.hint : 'Nothing left to fear... probably.';
+    const next = (this.lvl.trolls ?? []).filter((tr) => tr.x + tr.w > hx - 0.5).sort((a, b) => a.x - b.x)[0];
+    const text = t(next ? next.hint : 'hint.none');
     this.hintShown = { id: next ? next.id : '', text };
+    const c = this.showHintBox(text);
+    this.tweens.add({ targets: c, alpha: 0, delay: 4200, duration: 400, onComplete: () => { c.destroy(); if (this.hintBox === c) this.hintBox = null; } });
+    if (next) {
+      // highlight exactly the dangerous tiles
+      for (const [x, y, ww, hh] of next.danger) {
+        const hl = this.track(this.add.rectangle(x * TILE, y * TILE, ww * TILE, hh * TILE, 0xffd23f, 0.3).setOrigin(0).setDepth(20));
+        hl.setStrokeStyle(5, 0xffd23f, 0.95);
+        hl.setName('highlight');
+        this.tweens.add({ targets: hl, alpha: 0.25, duration: 300, yoyo: true, repeat: 6, onComplete: () => hl.setVisible(false) });
+      }
+    }
+    this.sfx('coin');
+  }
+
+  /** The hint box: wraps the text to the visible width (phones) and returns the container. */
+  showHintBox(text: string): Phaser.GameObjects.Container {
     this.hintBox?.destroy();
     const c = this.add.container(WORLD_W / 2, 150).setDepth(150);
-    const t = label(this, 0, 0, text, 24, '#2b2d42', 0);
-    const w = Math.min(1100, t.width + 70);
+    const box = this.hintBoxMaxW();
+    const tx = label(this, 0, 0, text, 24, '#2b2d42', 0);
+    tx.setWordWrapWidth((box - 90) * RES, true);
+    fitText(tx, box - 90);
+    const w = Math.min(box, tx.displayWidth + 90);
+    const h = Math.max(60, tx.displayHeight + 24);
     const g = this.add.graphics();
-    g.fillStyle(0xfff6d5, 0.96).fillRoundedRect(-w / 2, -30, w, 60, 22);
-    g.lineStyle(5, 0x2b2d42, 1).strokeRoundedRect(-w / 2, -30, w, 60, 22);
-    const bulb = this.add.image(-w / 2 + 28, 0, 'icon-bulb').setScale(0.9 / RES).setTint(0xf2b705);
-    t.setX(14);
-    c.add([g, bulb, t]);
+    g.fillStyle(0xfff6d5, 0.96).fillRoundedRect(-w / 2, -h / 2, w, h, 22);
+    g.lineStyle(5, 0x2b2d42, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, 22);
+    const bulb = this.add.image(-w / 2 + 30, 0, 'icon-bulb').setScale(0.9 / RES).setTint(0xf2b705);
+    tx.setX(16);
+    c.add([g, bulb, tx]);
+    c.setName('hintbox');
+    c.setData('w', w);
     this.uiLayer.add(c);
+    c.setData('h', h);
+    c.setData('maxW', box);
     this.hintBox = c;
     c.setScale(0.3);
     this.tweens.add({ targets: c, scale: 1, duration: 180, ease: 'Back.Out' });
-    this.tweens.add({ targets: c, alpha: 0, delay: 4200, duration: 400, onComplete: () => { c.destroy(); if (this.hintBox === c) this.hintBox = null; } });
-    if (next) {
-      const hl = this.track(this.add.rectangle(next.x * TILE, 0, next.w * TILE, WORLD_H, 0xffd23f, 0.22).setOrigin(0).setDepth(20));
-      hl.setStrokeStyle(6, 0xffd23f, 0.9);
-      this.tweens.add({ targets: hl, alpha: 0.25, duration: 300, yoyo: true, repeat: 4, onComplete: () => hl.setVisible(false) });
-    }
-    this.sfx('coin');
+    return c;
+  }
+
+  /** Is there solid ground anywhere above the hero (shelter from lightning)? */
+  private roofed(): boolean {
+    const tx = Math.floor(this.pbody.center.x / TILE);
+    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 1000 + tx)) return true;
+    return false;
+  }
+
+  /** Widest hint box that fits the visible screen (phones are narrow). */
+  private hintBoxMaxW(): number {
+    const L = this.lay;
+    return Math.min(1100, (L ? L.right - L.left : WORLD_W) - 40);
   }
 
   private troll(id: string | undefined): void {
@@ -1305,6 +1542,14 @@ export class GameScene extends Phaser.Scene {
   private checkTriggers(): void {
     const pr = this.playerRect(0);
     for (const t of this.triggers) {
+      if (t.def.hold && t.def.when.zone) {
+        // zone effects: on while inside, undone on leaving
+        const [x, y, ww, hh] = t.def.when.zone;
+        const inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+        if (inside && !t.inside) { t.inside = true; this.troll(t.def.troll); this.runActions(t.def.do, t.fired); t.fired = true; }
+        else if (!inside && t.inside) { t.inside = false; this.runActions(t.def.undo ?? [], true); }
+        continue;
+      }
       if (t.fired) continue;
       const w = t.def.when;
       let ok = false;
@@ -1315,6 +1560,7 @@ export class GameScene extends Phaser.Scene {
         ok = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
         if (ok && w.airborne) ok = !this.grounded;
         if (ok && w.grounded) ok = this.grounded;
+        if (ok && w.landFaster !== undefined) ok = this.grounded && !this.wasGrounded && Math.abs(this.lastVy) >= w.landFaster;
       } else if (w.touch) {
         const g = this.groups.get(w.touch);
         if (g && g.visible) {
@@ -1326,10 +1572,10 @@ export class GameScene extends Phaser.Scene {
       t.fired = true;
       if (t.def.id) this.fired.add(t.def.id);
       this.troll(t.def.troll);
-      if (t.def.delay) this.scheduled.push({ at: this.levelTick + t.def.delay, actions: t.def.do, every: t.def.every });
+      if (t.def.delay) this.scheduled.push({ at: this.levelTick + t.def.delay, actions: t.def.do, every: t.def.every, stopAt: t.def.stopAt });
       else {
         this.runActions(t.def.do);
-        if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true });
+        if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true, stopAt: t.def.stopAt });
       }
     }
   }
@@ -1339,8 +1585,9 @@ export class GameScene extends Phaser.Scene {
     const due = this.scheduled.filter((s) => s.at <= this.levelTick);
     this.scheduled = this.scheduled.filter((s) => s.at > this.levelTick);
     for (const s of due) {
+      if (s.stopAt !== undefined && this.pbody.center.x > s.stopAt * TILE) continue;
       this.runActions(s.actions, !!s.repeat);
-      if (s.every) this.scheduled.push({ at: s.at + s.every, actions: s.actions, every: s.every, repeat: true });
+      if (s.every) this.scheduled.push({ at: s.at + s.every, actions: s.actions, every: s.every, repeat: true, stopAt: s.stopAt });
     }
   }
 
@@ -1377,6 +1624,48 @@ export class GameScene extends Phaser.Scene {
         g.move = { fx: g.ox, fy: g.oy, tx: g.ox + a.by[0] * TILE, ty: g.oy + a.by[1] * TILE, t: 0, dur: Math.max(1, a.ticks), deadly: !!a.deadly, returnAfter: a.returnAfter, returnTicks: a.returnTicks, back: false };
         g.deadlyMove = !!a.deadly;
         if (a.deadly) { g.solid = false; trap = true; }
+      } else if ('toss' in a) {
+        const g = this.grp(a.toss);
+        g.toss = { vx: a.vel[0], vy: a.vel[1] };
+        g.visible = true;
+        g.container.setVisible(true);
+        trap = true;
+      } else if ('eat' in a) {
+        const g = this.grp(a.eat);
+        g.eatX = g.minTx * TILE;
+        g.eatSpeed = a.speed;
+        this.sfx('crumble');
+        trap = true;
+      } else if ('activate' in a) {
+        const g = this.grp(a.activate);
+        g.active = true;
+        g.visible = true;
+        g.container.setVisible(true);
+        trap = true;
+      } else if ('deactivate' in a) {
+        this.grp(a.deactivate).active = false;
+      } else if ('clone' in a) {
+        const img = new Hero(this, this.pbody.center.x, this.pbody.bottom);
+        img.setAlpha(0.75);
+        img.iterate((o: Phaser.GameObjects.GameObject) => { if (o instanceof Phaser.GameObjects.Image) o.setTint(0x3a2d5c); });
+        this.track(img.setDepth(4));
+        this.clone = { delay: a.clone, path: [], img };
+        this.say('say.clone', 'hero', 50);
+        trap = true;
+      } else if ('unclone' in a) {
+        if (this.clone?.img) this.tweens.add({ targets: this.clone.img, alpha: 0, duration: 300 });
+        this.clone = null;
+      } else if ('storm' in a) {
+        const cloud = this.track(this.add.image(this.pbody.center.x, 2 * TILE, 'storm').setScale(1 / RES).setDepth(8));
+        const bolt = this.track(this.add.image(0, 0, 'bolt').setOrigin(0.5, 0).setScale(1 / RES).setDepth(8).setVisible(false));
+        this.storm = { every: a.storm.every, warn: a.storm.warn, x: this.pbody.center.x - 3 * TILE, t: 0, strikeX: 0, strikeT: 0, cloud, bolt };
+        trap = true;
+      } else if ('unstorm' in a) {
+        if (this.storm) { this.tweens.add({ targets: this.storm.cloud, alpha: 0, duration: 400 }); this.storm.bolt.setVisible(false); }
+        this.storm = null;
+      } else if ('gravityX' in a) {
+        this.gravX = a.gravityX;
+        if (a.gravityX !== 0) { this.say('say.pull', 'hero', 50); this.sfx('flip'); trap = true; }
       } else if ('chase' in a) {
         const g = this.grp(a.chase);
         g.chase = { vx: a.vel[0], vy: a.vel[1], untilX: a.untilX };
@@ -1389,12 +1678,12 @@ export class GameScene extends Phaser.Scene {
         this.doorSpeed = a.speed;
         this.doorWait = a.hehe ?? 0;
         if (this.door) {
-          if (this.doorWait > 0) { this.door.hehe(); this.say('hehe', 'door', 40); this.sfx('hehe'); }
+          if (this.doorWait > 0) { this.door.hehe(); this.say('say.hehe', 'door', 40); this.sfx('hehe'); }
         }
         trap = true;
       } else if ('doorHehe' in a) {
         this.door?.hehe();
-        this.say('hehe', 'door', a.doorHehe);
+        this.say('say.hehe', 'door', a.doorHehe);
         this.sfx('hehe');
       } else if ('gravity' in a) {
         this.gdir = a.gravity === 'flip' ? -this.gdir : 1;
@@ -1407,20 +1696,20 @@ export class GameScene extends Phaser.Scene {
         this.ctrlMode = a.controls;
         this.ctrlFlip = a.controls === 'flip';
         if (a.controls !== 'normal') {
-          this.say(a.controls === 'flip' ? 'huh?!' : a.controls === 'nojump' ? '...?' : 'whoa!', 'hero', 50);
+          this.say(`say.ctrl.${a.controls}`, 'hero', 50);
           this.sfx('flip');
           trap = true;
         }
       } else if ('gravityScale' in a) {
         this.gScale = a.gravityScale;
         if (a.gravityScale !== 1) {
-          this.say(a.gravityScale < 1 ? 'floaty...' : 'so heavy...', 'hero', 50);
+          this.say(a.gravityScale < 1 ? 'say.floaty' : 'say.heavy', 'hero', 50);
           this.sfx('flip');
           trap = true;
         }
       } else if ('camera' in a) {
-        this.cameraTrick(a.camera);
-        if (a.camera === 'freeze' || a.camera === 'flip' || a.camera === 'zoom') trap = true;
+        this.cameraTrick(a.camera, a.target);
+        if (['freeze', 'flip', 'zoom', 'dark', 'strobe', 'smudge', 'back', 'seasick', 'decoy'].includes(a.camera)) trap = true;
       } else if ('fakeClear' in a) {
         this.showFakeClear(a.fakeClear);
         if (a.fakeClear) trap = true;
@@ -1461,11 +1750,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateGroups(): void {
+    const prev = new Map<GroupRT, [number, number]>();
+    for (const g of this.groups.values()) prev.set(g, [g.ox, g.oy]);
+    // pulleys: standing on one side lowers it and lifts its partner
     for (const g of this.groups.values()) {
-      const ox0 = g.ox, oy0 = g.oy;
+      const pu = g.def.pulley;
+      if (!pu) continue;
+      const p = this.grp(pu.partner);
+      const lim = pu.range * TILE;
+      if (this.ride === g && g.oy < lim) { g.oy = Math.min(lim, g.oy + pu.speed); p.oy = -g.oy; }
+      else if (this.ride === p && p.oy < lim) { p.oy = Math.min(lim, p.oy + pu.speed); g.oy = -p.oy; }
+    }
+    for (const g of this.groups.values()) {
+      const [ox0, oy0] = prev.get(g)!;
       g.dx = 0;
       g.dy = 0;
       if (g.state === 'gone') continue;
+      this.groupBehaviour(g);
       if (g.deadlyEnd) { g.deadlyEnd = false; g.deadlyMove = false; }
       if (g.state === 'shaking') {
         g.shakeT--;
@@ -1507,14 +1808,106 @@ export class GameScene extends Phaser.Scene {
       for (const z of g.bodies) {
         const base = z.getData('base') as { x: number; y: number };
         z.setPosition(base.x + g.ox, base.y + g.oy);
+        if (g.eatX !== null && base.x + TILE / 2 <= g.eatX) (z.body as Phaser.Physics.Arcade.Body).enable = false;
       }
     }
+    this.updateHunters();
     // spike pop animation
     for (const s of this.spikes) {
       if (s.extend > 0 && s.extend < 1) {
         s.extend = Math.min(1, s.extend + 0.34);
         this.placeSpike(s);
       }
+    }
+  }
+
+  /** Special group behaviours (all deterministic, per tick). */
+  private groupBehaviour(g: GroupRT): void {
+    const d = g.def;
+    const hx = this.pbody.center.x, hy = this.pbody.center.y;
+    if (d.orbit) {
+      const ph = d.orbit.phase ?? 0;
+      const a = (this.levelTick / d.orbit.period) * Math.PI * 2 + ph;
+      g.ox = d.orbit.r * TILE * (Math.cos(a) - Math.cos(ph));
+      g.oy = d.orbit.r * TILE * (Math.sin(a) - Math.sin(ph));
+    }
+    if (d.follow) {
+      if (this.ride === g) g.active = true;
+      if (g.active) {
+        const want = Phaser.Math.Clamp(hx - g.cx, d.follow.min * TILE, d.follow.max * TILE);
+        g.ox = approach(g.ox, want, d.follow.speed);
+      }
+    }
+    if (d.homing && g.active) {
+      const dx = hx - (g.cx + g.ox), dy = hy - (g.cy + g.oy);
+      const dist = Math.hypot(dx, dy) || 1;
+      g.ox += (dx / dist) * d.homing;
+      g.oy += (dy / dist) * d.homing;
+      // it cannot fly through walls: crashing into solid ground ends it
+      const tx = Math.floor((g.cx + g.ox) / TILE), ty = Math.floor((g.cy + g.oy) / TILE);
+      if (this.staticSolid.has(ty * 1000 + tx)) {
+        g.active = false;
+        g.visible = false;
+        g.container.setVisible(false);
+        this.emitDeath.emitParticleAt(g.cx + g.ox, g.cy + g.oy, 14);
+        this.sfx('slam');
+      }
+    }
+    if (d.frog && g.active) {
+      const dx = hx - (g.cx + g.ox);
+      if (Math.abs(dx) > 2) g.ox += Math.sign(dx) * Math.min(Math.abs(dx), d.frog.speed);
+      if (this.jumpedNow && !g.frogAir) { g.frogAir = true; g.frogVy = -d.frog.jump; this.sfx('jump'); }
+      if (g.frogAir) {
+        g.oy += g.frogVy;
+        g.frogVy += 0.65;
+        if (g.oy >= 0) { g.oy = 0; g.frogAir = false; }
+      }
+    }
+    if (d.turret && g.active) {
+      g.turretT++;
+      if (g.turretT % d.turret.every === 1) {
+        const x = g.minTx * TILE + g.ox - 10, y = g.cy + g.oy;
+        const img = this.track(this.add.image(x, y, 'ball').setScale(0.8 / RES).setDepth(3));
+        this.shots.push({ x, y, vx: d.turret.vx, left: d.turret.range * TILE, img });
+        this.sfx('click');
+      }
+    }
+    if (g.toss) {
+      g.ox += g.toss.vx;
+      g.oy += g.toss.vy;
+      g.toss.vy += 0.5;
+      if (g.oy > WORLD_H + 200) { g.toss = null; g.visible = false; g.container.setVisible(false); }
+    }
+    if (g.eatX !== null) {
+      g.eatX += g.eatSpeed;
+      if (g.img) {
+        const cut = Math.max(0, (g.eatX - (g.minTx * TILE - 2)) * RES);
+        g.img.setCrop(cut, 0, Math.max(0, g.img.width - cut), g.img.height);
+      }
+    }
+  }
+
+  /** Projectiles, the shadow clone and the storm cloud. */
+  private updateHunters(): void {
+    for (const sh of this.shots) {
+      sh.x += sh.vx;
+      sh.left -= Math.abs(sh.vx);
+      const tx = Math.floor(sh.x / TILE), ty = Math.floor(sh.y / TILE);
+      if (sh.left <= 0 || this.staticSolid.has(ty * 1000 + tx)) { sh.left = -1; sh.img.destroy(); }
+    }
+    this.shots = this.shots.filter((sh) => sh.left >= 0);
+    if (this.clone) {
+      this.clone.path.push({ x: this.pbody.center.x, y: this.pbody.center.y });
+      if (this.clone.path.length > this.clone.delay + 2) this.clone.path.shift();
+    }
+    const st = this.storm;
+    if (st) {
+      st.x = approach(st.x, this.pbody.center.x, 4.2);
+      st.t++;
+      if (st.strikeT > 0) st.strikeT--;
+      const ph = st.t % st.every;
+      if (ph === st.every - st.warn) { st.strikeX = st.x; this.sfx('click'); }
+      if (ph === 0) { st.strikeT = 10; this.sfx('slam'); }
     }
   }
 
@@ -1536,7 +1929,7 @@ export class GameScene extends Phaser.Scene {
       if (!this.doorPath.length) {
         this.door.running = false;
         this.door.setFace('tired');
-        this.say('huff', 'door', 50);
+        this.say('say.huff', 'door', 50);
       }
     } else {
       this.doorPos = { x: this.doorPos.x + (dx / dist) * this.doorSpeed, y: this.doorPos.y + (dy / dist) * this.doorSpeed };
@@ -1550,7 +1943,7 @@ export class GameScene extends Phaser.Scene {
     if (at === 'door') { x = this.doorPos.x; y = this.doorPos.y - 108; }
     else if (at === 'hero') { x = this.pbody.center.x; y = this.pbody.y - 26; }
     else { x = at[0] * TILE + TILE / 2; y = at[1] * TILE + TILE; }
-    const c = bubble(this, x, y, text);
+    const c = bubble(this, x, y, t(text));
     this.worldLayer.add(c);
     this.bubbles.push({ c, until: this.levelTick + ticks, follow: at === 'door' ? 'door' : at === 'hero' ? 'hero' : undefined });
   }
@@ -1575,7 +1968,7 @@ export class GameScene extends Phaser.Scene {
     this.sfx('death');
     const q = this.lvl.deathQuips;
     if (q && q.length) {
-      this.quip.setText(q[(this.deathsLevel - 1) % q.length]).setAlpha(1).setScale(0.6 / RES);
+      this.quip.setText(t(q[(this.deathsLevel - 1) % q.length])).setAlpha(1).setScale(0.6 / RES);
       this.tweens.killTweensOf(this.quip);
       this.tweens.add({ targets: this.quip, scale: 1 / RES, duration: 160, ease: 'Back.Out' });
       this.tweens.add({ targets: this.quip, alpha: 0, delay: 1100, duration: 300 });
@@ -1590,7 +1983,7 @@ export class GameScene extends Phaser.Scene {
   restartLevel(): void {
     if (this.overlay) this.closeOverlay();
     this.paused = false;
-    this.cpActive = false;
+    this.cpIdx = -1;
     this.clearLevel();
     this.buildLevel();
   }
@@ -1614,17 +2007,18 @@ export class GameScene extends Phaser.Scene {
     const c = this.makeOverlay();
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
     c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
-    const t1 = label(this, cx, cy - 130, last ? 'YOU BEAT THE DOOR!' : `LEVEL ${this.levelNum} CLEAR`, 30, '#6fd36b', 7);
-    const msg = label(this, cx, cy - 64, this.lvl.winMessage, 46, '#ffd23f', 10);
+    const t1 = fitText(label(this, cx, cy - 130, last ? t('ui.beatGame') : t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
+    const msg = fitText(label(this, cx, cy - 64, t(this.lvl.winMessage), 46, '#ffd23f', 10), 600);
     const d = this.deathsLevel;
-    const t2 = label(this, cx, cy + 6, d === 0 ? 'Deaths: 0  — not even once?!' : `Deaths this level: ${d}`, 28, '#ffffff', 7);
-    const t3 = label(this, cx, cy + 46, `Total deaths: ${Save.get().totalDeaths}`, 22, '#fff6d5', 6);
+    const t2 = fitText(label(this, cx, cy + 6, d === 0 ? t('ui.deathsNone') : t('ui.deathsLevel', { n: d }), 28, '#ffffff', 7), 600);
+    const t3 = fitText(label(this, cx, cy + 46, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 22, '#fff6d5', 6), 600);
     c.add([t1, msg, t2, t3]);
+    const ms = msg.scale;
     msg.setScale(0.2);
-    this.tweens.add({ targets: msg, scale: 1 / RES, duration: 320, ease: 'Back.Out' });
-    const bLv = new Button(this, cx - 200, cy + 130, { w: 150, h: 64, icon: 'menu', text: 'Levels', fontSize: 22, color: '#5b8cff' }, () => this.toSelect());
-    const bRe = new Button(this, cx - 20, cy + 130, { w: 160, h: 64, icon: 'restart', text: 'Retry', fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel());
-    const bNx = new Button(this, cx + 180, cy + 130, { w: 190, h: 72, icon: 'play', text: last ? 'Menu' : 'Next', fontSize: 30, color: '#6fd36b' }, () => this.nextLevel());
+    this.tweens.add({ targets: msg, scale: ms, duration: 320, ease: 'Back.Out' });
+    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.toSelect());
+    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel());
+    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: last ? t('ui.menu') : t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.nextLevel());
     c.add([bLv, bRe, bNx]);
   }
 
@@ -1671,20 +2065,25 @@ export class GameScene extends Phaser.Scene {
     this.paused = true;
     const c = this.makeOverlay();
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
-    c.add(panel(this, cx, cy, 460, 440, 0xfff6d5));
-    c.add(label(this, cx, cy - 160, 'PAUSED', 44, '#ffd23f', 9));
+    c.add(panel(this, cx, cy, 600, 500, 0xfff6d5));
+    c.add(fitText(label(this, cx, cy - 196, t('ui.paused'), 44, '#ffd23f', 9), 540));
     const items: [string, string, string, () => void][] = [
-      ['play', 'Resume', '#6fd36b', () => this.togglePause()],
-      ['restart', 'Restart', '#9f7bd8', () => this.restartLevel()],
-      ['menu', 'Levels', '#5b8cff', () => this.toSelect()],
+      ['play', t('ui.resume'), '#6fd36b', () => this.togglePause()],
+      ['restart', t('ui.restart'), '#9f7bd8', () => this.restartLevel()],
+      ['menu', t('ui.levels'), '#5b8cff', () => this.toSelect()],
     ];
-    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 70 + i * 82, { w: 260, h: 64, icon, text, fontSize: 26, color }, fn)));
-    const mb = new Button(this, cx, cy + 176, { w: 260, h: 56, icon: Audio.muted ? 'mute' : 'sound', text: Audio.muted ? 'Sound off' : 'Sound on', fontSize: 22, color: '#ff8a5b' }, () => {
+    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 112 + i * 78, { w: 300, h: 62, icon, text, fontSize: 26, color }, fn)));
+    const mb = new Button(this, cx, cy + 122, { w: 300, h: 56, icon: Audio.muted ? 'mute' : 'sound', text: Audio.muted ? t('ui.soundOff') : t('ui.soundOn'), fontSize: 22, color: '#ff8a5b' }, () => {
       this.toggleMute();
       mb.setIcon(Audio.muted ? 'mute' : 'sound');
-      mb.txt?.setText(Audio.muted ? 'Sound off' : 'Sound on');
+      mb.setText(Audio.muted ? t('ui.soundOff') : t('ui.soundOn'));
     });
     c.add(mb);
+    const lb = new Button(this, cx, cy + 192, { w: 300, h: 56, icon: 'globe', text: currentLangName(), fontSize: 22, color: '#41c6c0' }, () => {
+      openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed }); });
+    });
+    lb.setName('langbtn');
+    c.add(lb);
   }
 
   // -------------------------------------------------------------------------
@@ -1724,17 +2123,89 @@ export class GameScene extends Phaser.Scene {
     const keep = this.bubbles.filter((x) => x.until > this.levelTick);
     for (const x of this.bubbles) if (x.until <= this.levelTick) x.c.destroy();
     this.bubbles = keep;
+    // hunters
+    if (this.clone?.img) {
+      const p = this.clone.path;
+      const c = p.length > this.clone.delay ? p[p.length - 1 - this.clone.delay] : null;
+      this.clone.img.setVisible(!!c);
+      if (c) { this.clone.img.setPosition(c.x, c.y + PHYS.bodyH / 2 + 1); this.clone.img.animate(dt, 200, true, false, 0); }
+    }
+    if (this.storm) {
+      const st = this.storm;
+      const warning = st.t % st.every >= st.every - st.warn;
+      st.cloud.setPosition(warning ? st.strikeX : st.x, 2.2 * TILE).setTint(warning && Math.floor(this.levelTick / 4) % 2 ? 0xfff27a : 0xffffff);
+      st.bolt.setVisible(st.strikeT > 0).setPosition(st.strikeX, 2.8 * TILE);
+    }
+    for (const sh of this.shots) sh.img.setPosition(sh.x, sh.y).setRotation(sh.x / 15);
+    for (const g of this.groups.values()) {
+      const h = g.container.getData('hero') as Hero | undefined;
+      if (h) h.animate(dt, g.dx * 60, true, false, 0);
+    }
     // camera: smooth follow with a little look-ahead in the running direction
     const cam = this.cameras.main;
     const wantZoom = this.baseZoom * this.camZoomMul;
     if (Math.abs(cam.zoom - wantZoom) > 0.001) cam.setZoom(cam.zoom + (wantZoom - cam.zoom) * Math.min(1, dt * 6));
     if (this.state === 'play' && !this.camFrozen) {
-      const look = Phaser.Math.Clamp(b.velocity.x * 0.35, -110, 110);
+      const decoy = this.camDecoy ? this.groups.get(this.camDecoy) : null;
+      const fx = decoy ? decoy.cx + decoy.ox : b.center.x;
+      const fy = decoy ? decoy.cy + decoy.oy : b.center.y;
+      // "look back" trap: the camera stares behind you (the hero stays on screen, at its edge)
+      const look = this.camBack ? -Math.min(300, cam.width / cam.zoom / 2 - 90) : Phaser.Math.Clamp(b.velocity.x * 0.35, -110, 110);
       const k = 1 - Math.pow(0.004, Math.min(dt, 0.05));
-      this.camX += (b.center.x + look - this.camX) * k;
-      this.camY += (b.center.y - 40 * this.gdir - this.camY) * k * 0.8;
+      this.camX += (fx + look - this.camX) * k;
+      this.camY += (fy - 40 * this.gdir - this.camY) * k * 0.8;
     }
+    if (this.camSeasick) cam.setRotation(Math.sin(this.levelTick / 38) * 0.17 + (this.camFlip ? Math.PI : 0));
     this.applyCamera();
+    this.renderVeils();
+    this.renderArrow();
+  }
+
+  /** Darkness (spotlight on the hero), strobe flashes and a smudge stuck to the screen. */
+  private renderVeils(): void {
+    const b = this.pbody;
+    const want = this.camDark || this.camStrobe;
+    if (want && !this.darkImg) this.darkImg = this.add.image(0, 0, 'veil').setDepth(4.6);
+    if (this.darkImg) {
+      if (!this.worldLayer.exists(this.darkImg)) this.worldLayer.add(this.darkImg);
+      // strobe: pitch black with a tiny light, the whole level flashes into view every 0.8 s
+      const flash = this.camStrobe && Math.floor(this.levelTick / 12) % 4 === 0;
+      this.darkImg.setVisible(want && !flash);
+      this.darkImg.setPosition(b.center.x, b.center.y).setScale(this.camStrobe ? 2.4 : 4);
+    }
+    if (this.camSmudge && !this.smudgeImg) {
+      this.smudgeImg = this.add.image(0, 0, 'smudge').setDepth(90);
+      this.uiLayer.add(this.smudgeImg);
+      this.cameras.main.ignore(this.smudgeImg);
+    }
+    if (this.smudgeImg) {
+      const L = this.lay;
+      this.smudgeImg.setVisible(this.camSmudge).setPosition(WORLD_W * 0.5 + (L.right - L.left) * 0.2, WORLD_H * 0.58).setScale(1.25 / RES);
+    }
+  }
+
+  /** When the hero is outside the visible area, an arrow at the screen edge shows where he is. */
+  private renderArrow(): void {
+    const cam = this.cameras.main;
+    const b = this.pbody;
+    const v = cam.worldView;
+    const m = 6;
+    const out = this.state === 'play' && (b.right < v.x + m || b.left > v.right - m || b.bottom < v.y + m || b.top > v.bottom - m);
+    this.arrowOn = out;
+    if (out && !this.arrowImg) {
+      this.arrowImg = this.add.image(0, 0, 'edge-arrow').setDepth(95);
+      this.uiLayer.add(this.arrowImg);
+      cam.ignore(this.arrowImg);
+    }
+    if (!this.arrowImg) return;
+    this.arrowImg.setVisible(out);
+    if (!out) return;
+    // the hero's position on the screen (clamped to the visible area), in UI coordinates
+    const sx = cam.x + (Phaser.Math.Clamp(b.center.x, v.x + 24, v.right - 24) - v.x) * cam.zoom;
+    const sy = cam.y + (Phaser.Math.Clamp(b.center.y, v.y + 24, v.bottom - 24) - v.y) * cam.zoom;
+    const p = this.uiCam.getWorldPoint(sx, sy);
+    const ang = Math.atan2(b.center.y - Phaser.Math.Clamp(b.center.y, v.y, v.bottom), b.center.x - Phaser.Math.Clamp(b.center.x, v.x, v.right));
+    this.arrowImg.setPosition(p.x, p.y).setRotation(ang).setScale((1 + 0.12 * Math.sin(this.levelTick / 5)) / RES);
   }
 
   // -------------------------------------------------------------------------
@@ -1750,6 +2221,11 @@ export class GameScene extends Phaser.Scene {
     this.useHint();
   }
 
+  /** Test hook: win right now (to show the level-complete card). */
+  debugWin(): void {
+    this.win();
+  }
+
   /** Test hook: kill the hero right now (used to check checkpoint respawns). */
   debugKill(): void {
     this.kill('test');
@@ -1762,11 +2238,16 @@ export class GameScene extends Phaser.Scene {
       x: b.center.x, y: b.center.y, vx: b.velocity.x, vy: b.velocity.y, grounded: this.grounded,
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
-      trolls: [...this.trollsFired], checkpoint: this.cpActive, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
+      trolls: [...this.trollsFired], checkpoint: this.cpIdx >= 0, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
       hudDeaths: this.deathText.text, ctrlMode: this.ctrlMode, gScale: this.gScale, camFrozen: this.camFrozen, camFlip: this.camFlip,
       camZoom: this.camZoomMul, hintUsed: this.hintUsed, hint: this.hintShown ? this.hintShown.text : '',
-      g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])), cpX: this.cp ? this.cp.x : -1, zoom: this.cameras.main.zoom,
-      viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE,
+      g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])),
+      cpX: this.cpIdx >= 0 ? this.cps[this.cpIdx].x : this.cps.length ? this.cps[0].x : -1, zoom: this.cameras.main.zoom,
+      viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE, cpIdx: this.cpIdx, cpCount: this.cps.length,
+      arrow: this.arrowOn, gravX: this.gravX,
+      shot: this.shots.reduce((m, sh) => (sh.x > b.center.x - 10 ? Math.min(m, sh.x - b.center.x) : m), 1e9),
+      roofed: this.roofed(),
+      cam: [this.camFrozen && 'freeze', this.camFlip && 'flip', this.camZoomMul > 1 && 'zoom', this.camDark && 'dark', this.camStrobe && 'strobe', this.camSmudge && 'smudge', this.camBack && 'back', this.camSeasick && 'seasick', this.camDecoy && 'decoy'].filter(Boolean).join(','),
     };
   }
 }

@@ -121,7 +121,8 @@ export const PALETTES: Palette[] = [
   },
 ];
 
-export const FONT = '"Trebuchet MS", "Arial Rounded MT Bold", "Verdana", system-ui, sans-serif';
+/** Nunito (bundled, SIL OFL): Latin, Latin-extended (Turkish) and Cyrillic glyphs. */
+export const FONT = '"Nunito", "Trebuchet MS", "Verdana", system-ui, sans-serif';
 export const COLORS = {
   outline: 0x2b2d42,
   hero: 0xffd23f,
