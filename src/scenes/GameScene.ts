@@ -318,9 +318,11 @@ export class GameScene extends Phaser.Scene {
       const size = Math.min(72, P * 0.4);
       const top = Math.max(L.top, 0) + size * 0.7;
       for (const b of this.sysButtons) b.setScale(size / 64);
-      restart.setScale((size / 64) * 1.15);
-      restart.setPosition(WORLD_W + P / 2 - size * 0.62, top);
-      pause.setPosition(WORLD_W + P / 2 + size * 0.62, top);
+      // restart gets its own row: big and easy to find
+      const rs = Math.min(P * 0.78, 124);
+      restart.setScale(rs / 64);
+      restart.setPosition(WORLD_W + P / 2, Math.max(L.top, 0) + rs * 0.62);
+      pause.setPosition(WORLD_W + P / 2, Math.max(L.top, 0) + rs * 1.24 + size * 0.62);
       mute.setPosition(-P / 2 - size * 0.58, top + size * 1.25);
       hint.setPosition(-P / 2 + size * 0.58, top + size * 1.25);
     } else {
@@ -1035,6 +1037,11 @@ export class GameScene extends Phaser.Scene {
     w.singleStep();
     w.isPaused = true;
     this.afterPhysics();
+    if (this.tutorialMaxX && this.pbody.center.x > this.tutorialMaxX) {
+      Save.setTutorialSeen();
+      this.tutorialMaxX = 0;
+      for (const h of this.hints) this.tweens.add({ targets: h.obj, alpha: 0, duration: 400 });
+    }
     if (this.state !== 'play') return;
     this.checkTriggers();
     this.runScheduled();
@@ -1717,11 +1724,6 @@ export class GameScene extends Phaser.Scene {
     const keep = this.bubbles.filter((x) => x.until > this.levelTick);
     for (const x of this.bubbles) if (x.until <= this.levelTick) x.c.destroy();
     this.bubbles = keep;
-    if (this.tutorialMaxX && this.pbody.center.x > this.tutorialMaxX) {
-      Save.setTutorialSeen();
-      this.tutorialMaxX = 0;
-      for (const h of this.hints) this.tweens.add({ targets: h.obj, alpha: 0, duration: 400 });
-    }
     // camera: smooth follow with a little look-ahead in the running direction
     const cam = this.cameras.main;
     const wantZoom = this.baseZoom * this.camZoomMul;

@@ -8,9 +8,15 @@
 //  5. Layouts: phone landscape (touch buttons in side pillars, real touch input moves and
 //     jumps the hero), phone portrait ("rotate your phone"), desktop 1280×720.
 //  6. No console errors anywhere; build size < 10 MB.
+//  7. Level design rules: no soft-locks (static analysis of every reachable spot in every
+//     world state), every trap type belongs to exactly one level, no text hints except the
+//     level-1 controls (shown once), one player-chosen hint per level that changes nothing.
+//  8. Phone: holding ▲ gives exactly the same full jump as holding the keyboard key; the
+//     restart button is clearly visible on phone and desktop.
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { serveDist, launch, openGame, replay, ROOT } from './harness.mjs';
+import { analyzeLevel } from './softlock.mjs';
 
 const results = [];
 const log = (ok, name, detail = '') => {
@@ -29,7 +35,37 @@ const replays = Object.fromEntries(
   readdirSync(join(ROOT, 'tests', 'replays')).filter((f) => f.endsWith('.json')).sort()
     .map((f) => [Number(f.match(/\d+/)[0]), JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', f), 'utf8'))]),
 );
+const levelFiles = readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort();
+const LEVELS = levelFiles.map((f) => JSON.parse(readFileSync(join(ROOT, 'src', 'levels', f), 'utf8')));
 const shotDir = join(ROOT, 'test-results');
+
+// ---------------------------------------------------------------------------
+// 0. Static level-design rules (no browser needed)
+{
+  // the analyzer must catch the soft-lock that was reported in the old level 1
+  const old = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'softlock-old-level1.json'), 'utf8'));
+  const oa = analyzeLevel(old);
+  const hit = oa.stuck.some((p) => p.x >= 82 && p.x <= 94);
+  log(hit, 'soft-lock detector finds the reported pit in the OLD level 1 (cols 82-94)', [...new Set(oa.stuck.map((p) => `col ${p.x} row ${p.y}`))].join('; '));
+  for (const L of LEVELS) {
+    const a = analyzeLevel(L);
+    const spots = [...new Set(a.stuck.map((p) => `col ${p.x} row ${p.y}`))];
+    log(!spots.length && a.maxX >= L.map[0].length - 2, `level ${L.id}: no soft-locks (from every reachable spot the hero can reach the exit or die)`, spots.length ? `stuck at ${spots.join('; ')}` : `${a.reached} spots in ${a.states} world states checked`);
+  }
+  const owner = {};
+  let clash = [];
+  for (const L of LEVELS) for (const t of L.trolls) { if (owner[t.type] && owner[t.type] !== L.id) clash.push(`${t.type} (${owner[t.type]} & ${L.id})`); owner[t.type] = L.id; }
+  log(!clash.length && new Set(LEVELS.map((L) => L.world)).size === LEVELS.length && new Set(LEVELS.map((L) => L.idea)).size === LEVELS.length,
+    'every level has its own idea, palette and trap types (no type in two levels)', clash.length ? clash.join(', ') : `${Object.keys(owner).length} trap types, 10 ideas, 10 palettes`);
+  const texts = LEVELS.filter((L) => L.id !== 1 && (L.hints || []).length).map((L) => L.id);
+  const after = LEVELS.filter((L) => (L.hints || []).some((h) => 'afterDeaths' in h)).map((L) => L.id);
+  log(!texts.length && !after.length, 'no text hints in the levels (only the level-1 controls), none after deaths', texts.length || after.length ? `levels ${texts} / ${after}` : `level 1: ${(LEVELS[0].hints || []).map((h) => h.text).join(' | ')}`);
+  const w17 = LEVELS.slice(0, 7).reduce((a, L) => a + L.map[0].length, 0) / 7;
+  const w810 = LEVELS.slice(7).map((L) => L.map[0].length);
+  log(w810.every((w) => w >= w17 * 1.4), 'levels 8-10 are ~1.5× as long as levels 1-7', `avg 1-7: ${w17.toFixed(0)} tiles; 8-10: ${w810.join(', ')} (×${(w810.reduce((a, b) => a + b, 0) / 3 / w17).toFixed(2)})`);
+  const t17 = Math.max(...LEVELS.slice(0, 7).map((L) => L.trolls.length));
+  log(LEVELS.slice(7).every((L) => L.trolls.length > t17 || L.trolls.length >= 8), 'levels 8-10 have more troll moments', LEVELS.map((L) => `${L.id}:${L.trolls.length}`).join(' '));
+}
 mkdirSync(shotDir, { recursive: true });
 
 const { server, url } = await serveDist();
@@ -97,7 +133,7 @@ const levelInfo = {};
   let expected = 0;
   for (const [lvl, r] of Object.entries(replays)) {
     const level = Number(lvl);
-    const meta = JSON.parse(readFileSync(join(ROOT, 'src', 'levels', readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort()[level - 1]), 'utf8'));
+    const meta = LEVELS[level - 1];
     const fired = new Set();
     const w = await replay(page, level, r.win);
     w.final.trolls.forEach((t) => fired.add(t));
@@ -111,6 +147,12 @@ const levelInfo = {};
       expected += res.deaths;
       log(res.died && res.deaths === 1, `trap kills: level ${lvl} – ${name}`, `cause=${res.deathCause} at ${(res.firstDeathTick / 60).toFixed(1)} s${t.cp ? ' (from checkpoint)' : ''}`);
     }
+    // the hint button: shows the next trap's hint, greys out, changes nothing else
+    const h = await replay(page, level, r.win, { hintAt: 40 });
+    const hx = h.hinted.x / 40;
+    const nextTroll = meta.trolls.filter((t) => t.x + t.w > hx - 0.5).sort((a, b) => a.x - b.x)[0];
+    log(h.hinted.hintUsed && h.hinted.hint === nextTroll.hint && h.final.state === 'won' && h.final.levelTick === w.final.levelTick,
+      `level ${lvl}: the hint button shows the next trap's hint and changes nothing else`, `"${h.hinted.hint}" → still wins at the same tick ${h.final.levelTick}`);
     const missing = meta.trolls.filter((t) => !fired.has(t.id)).map((t) => t.name);
     log(missing.length === 0 && meta.trolls.length >= 5, `level ${lvl}: all ${meta.trolls.length} troll moments fire`, missing.length ? `never fired: ${missing.join('; ')}` : meta.trolls.map((t) => t.name).join(' · '));
     levelInfo[level] = { name: meta.name, width: meta.map[0].length, winSeconds: +(w.final.levelTick / 60).toFixed(1), cpSeconds: +(c.final.levelTick / 60).toFixed(1), trolls: meta.trolls.map((t) => t.name) };
@@ -140,12 +182,13 @@ const levelInfo = {};
 // traps re-armed (and "keep" results such as a fled door applied); restart → back to start.
 {
   const { page, errors, ctx } = await openGame(browser, url);
-  for (const level of [1, 3, 10]) {
+  for (const level of Object.keys(replays).map(Number)) {
     const r = replays[level];
     const res = await page.evaluate(({ level, rec }) => {
       const T = window.__DTTD;
       T.setManual(true);
       T.start(level, null, false);
+      const start = T.state();
       const keys = [];
       for (const [n, k] of rec) for (let i = 0; i < n; i++) keys.push(k);
       let i = 0, s = T.state();
@@ -160,13 +203,67 @@ const levelInfo = {};
       T.sim('', 2);
       const restarted = T.state();
       T.release();
-      return { reached: before.checkpoint, cpX: before.cpX, firedBefore: before.fired.length, after, restarted };
+      return { reached: before.checkpoint, cpX: before.cpX, firedBefore: before.fired.length, before, start, after, restarted };
     }, { level, rec: r.win });
     const atFlag = Math.abs(res.after.x - res.cpX) < 30 && res.after.state === 'play' && res.after.checkpoint;
     log(res.reached && atFlag && res.after.deathsLevel === 1, `level ${level}: death after the checkpoint respawns at the flag`, `flag x=${res.cpX}, respawn x=${res.after.x.toFixed(0)}, deaths=${res.after.deathsLevel}`);
-    log(res.after.doorX > res.cpX, `level ${level}: the door that already fled stays fled after the checkpoint respawn`, `door x=${res.after.doorX.toFixed(0)} (flag x=${res.cpX})`);
-    log(res.restarted.x < 200 && !res.restarted.checkpoint, `level ${level}: the restart button goes back to the very start`, `x=${res.restarted.x.toFixed(0)}`);
+    if (level === 7) log(res.before.doorX !== res.start.doorX && res.after.doorX > res.cpX && res.after.doorX !== res.start.doorX, `level ${level}: the door that already ran away stays away after the checkpoint respawn`, `door x ${res.start.doorX.toFixed(0)} → ${res.before.doorX.toFixed(0)} (running), after respawn ${res.after.doorX.toFixed(0)} (its destination)`);
+    if (level === 1 || level === 10) log(res.restarted.x < 200 && !res.restarted.checkpoint, `level ${level}: the restart button goes back to the very start`, `x=${res.restarted.x.toFixed(0)}`);
   }
+  allErrors.push(...errors);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// 3c. Hint lifecycle and the one-time level-1 instructions
+{
+  const { page, errors, ctx } = await openGame(browser, url);
+  const r = await page.evaluate(({ win1 }) => {
+    const T = window.__DTTD;
+    T.resetSave();
+    T.setManual(true);
+    const sc = () => T.game.scene.getScene('Game');
+    const btn = () => { const b = sc().sysButtons[0]; return { alpha: b.alpha, enabled: b.enabled !== false, visible: b.visible }; };
+    const out = {};
+    T.start(4); T.sim('R', 20);
+    out.fresh = { used: T.state().hintUsed, btn: btn() };
+    T.hint();
+    const first = T.state().hint;
+    T.sim('', 5); T.hint();
+    out.used = { used: T.state().hintUsed, hint: first, again: T.state().hint, btn: btn() };
+    T.kill(); T.sim('', 30);
+    out.afterDeath = T.state().hintUsed;
+    T.restart(); T.sim('', 2);
+    out.afterRestart = T.state().hintUsed;
+    T.start(4); T.sim('', 2); // replay from level select
+    out.afterSelect = { used: T.state().hintUsed, btn: btn() };
+    // level 1 instructions: shown on the first visit only
+    T.start(1); T.sim('', 2);
+    out.tut1 = sc().hints.filter((h) => h.obj.visible && h.obj.alpha > 0).map((h) => h.obj.text);
+    const keys = []; for (const [n, k] of win1) for (let i = 0; i < n; i++) keys.push(k);
+    let i = 0; while (i < keys.length && T.state().state === 'play') T.sim(keys[i++], 1);
+    out.seen = T.Save.get().tutorialSeen;
+    out.won = T.state().state;
+    sc().nextLevel(); T.step(3);
+    out.nextLevel = { level: T.state().level, used: T.state().hintUsed };
+    T.start(1); T.sim('', 2);
+    out.tut2 = sc().hints.length;
+    // no text appears after many deaths in any level
+    out.deathText = [];
+    for (let l = 1; l <= 10; l++) {
+      T.start(l);
+      for (let d = 0; d < 6; d++) { T.kill(); T.sim('', 30); }
+      out.deathText.push(sc().hints.length);
+    }
+    T.release();
+    return out;
+  }, { win1: replays[1].win });
+  log(!r.fresh.used && r.fresh.btn.enabled && r.fresh.btn.alpha === 1, 'hint button is available at the start of a level', JSON.stringify(r.fresh));
+  log(r.used.used && !!r.used.hint && r.used.again === r.used.hint && !r.used.btn.enabled && r.used.btn.alpha < 0.5, 'hint is used once, then the button greys out', `"${r.used.hint}", alpha ${r.used.btn.alpha}`);
+  log(r.afterDeath && r.afterRestart, 'dying or restarting does not give the hint back', `after death ${r.afterDeath}, after restart ${r.afterRestart}`);
+  log(!r.afterSelect.used && r.afterSelect.btn.enabled && !r.nextLevel.used && r.nextLevel.level === 2, 'hint resets when the level is replayed from level select or the next level starts', JSON.stringify({ select: r.afterSelect.used, next: r.nextLevel }));
+  log(r.tut1.length === 2 && r.seen && r.won === 'won' && r.tut2 === 0, 'level-1 move/jump instructions are shown once, never again', `first visit: ${r.tut1.join(' | ')}; second visit: ${r.tut2} texts`);
+  log(r.deathText.every((n) => n === 0), 'no text hint appears after deaths in any level', `texts after 6 deaths per level: ${r.deathText.join(',')}`);
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -224,10 +321,14 @@ const levelInfo = {};
   await d.page.waitForTimeout(600);
   const dl = await d.page.evaluate(() => {
     const g = window.__DTTD.game.scene.getScene('Game');
-    return { zoom: g.cameras.main.zoom, touch: g.touchUI.visible };
+    const b = g.sysButtons[1]; const bb = b.getBounds(); const cam = g.uiCam; const w = cam.getWorldPoint(0, 0);
+    const rb = { visible: b.visible && b.alpha === 1, x: (bb.x - w.x) * cam.zoom, y: (bb.y - w.y) * cam.zoom, w: bb.width * cam.zoom, h: bb.height * cam.zoom };
+    return { zoom: g.cameras.main.zoom, touch: g.touchUI.visible, rb };
   });
   await d.page.screenshot({ path: join(shotDir, 'layout-desktop-1280x720.png') });
-  log(Math.abs(dl.zoom - 1) < 0.01 && !dl.touch, 'desktop 1280×720: level fills the screen, no touch buttons', JSON.stringify(dl));
+  log(Math.abs(dl.zoom - 1) < 0.01 && !dl.touch, 'desktop 1280×720: level fills the screen, no touch buttons', JSON.stringify({ zoom: dl.zoom, touch: dl.touch }));
+  const drb = dl.rb;
+  log(drb.visible && drb.w >= 44 && drb.x >= 0 && drb.y >= 0 && drb.x + drb.w <= 1280 && drb.y + drb.h <= 720, 'desktop: restart button is visible on screen', `${drb.w.toFixed(0)}×${drb.h.toFixed(0)} px at (${drb.x.toFixed(0)}, ${drb.y.toFixed(0)})`);
   allErrors.push(...d.errors);
   await d.ctx.close();
 
@@ -274,8 +375,9 @@ const levelInfo = {};
   };
   const x0 = (await st()).x;
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: right.x, y: right.y, id: 1 }] });
-  const s1 = await waitTicks(36);
-  const x1 = s1.x, vx = s1.vx;
+  let vx = 0;
+  const s1 = await waitTicks(36, (s) => { vx = Math.max(vx, s.vx); });
+  const x1 = s1.x;
   // multi-touch: keep holding right, press jump with a second finger
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: right.x, y: right.y, id: 1 }, { x: jump.x, y: jump.y, id: 2 }] });
   let minY = 1e9;
@@ -284,6 +386,44 @@ const levelInfo = {};
   const y0 = 586;
   log(x1 > x0 + 20 && vx > 250, 'touch: holding ▶ moves the hero right', `x ${x0.toFixed(0)} → ${x1.toFixed(0)}, vx ${vx.toFixed(0)}`);
   log(minY < y0 - 40, 'touch: second finger on jump makes the hero jump (multi-touch)', `min y ${minY.toFixed(0)} (ground ${y0})`);
+
+  // Full jump: holding ▲ must give exactly the same jump as holding the keyboard key —
+  // also when the thumb slides off the button into the level while holding.
+  const jumpPeak = async (press, release) => {
+    await p.page.evaluate(() => window.__DTTD.start(1));
+    await waitTicks(25);
+    // record the hero's height on every fixed game tick (exact, independent of frame timing)
+    await p.page.evaluate(() => {
+      const sc = window.__DTTD.game.scene.getScene('Game');
+      window.__ys = [];
+      if (!sc.__peakHook) { const o = sc.fixedTick; sc.fixedTick = function () { o.call(this); window.__ys.push(this.pbody.center.y); }; sc.__peakHook = true; }
+    });
+    await press();
+    await waitTicks(50);
+    await release();
+    await waitTicks(30);
+    return p.page.evaluate(() => { const ys = window.__ys; return Math.max(...ys) - Math.min(...ys); });
+  };
+  const kb = await jumpPeak(() => p.page.keyboard.down('Space'), () => p.page.keyboard.up('Space'));
+  const tch = await jumpPeak(
+    () => cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: jump.x, y: jump.y, id: 3 }] }),
+    () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+  const drift = await jumpPeak(async () => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: jump.x, y: jump.y, id: 4 }] });
+    for (let k = 1; k <= 6; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: jump.x - k * 60, y: jump.y - k * 25, id: 4 }] });
+  }, () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+  log(kb > 100 && Math.abs(kb - tch) <= 1 && Math.abs(kb - drift) <= 1, 'touch: holding ▲ gives exactly the same full jump as holding the keyboard key', `keyboard ${kb.toFixed(1)} px, ▲ ${tch.toFixed(1)} px, ▲ with thumb sliding into the level ${drift.toFixed(1)} px`);
+
+  // restart button: clearly visible, big, outside the level area
+  const rb = await p.page.evaluate(() => {
+    const g = window.__DTTD.game.scene.getScene('Game');
+    const cam = g.uiCam; const dpr = g.scale.width / window.innerWidth;
+    const b = g.sysButtons[1]; const bb = b.getBounds();
+    const w = cam.getWorldPoint(0, 0); const z = cam.zoom;
+    return { visible: b.visible && b.alpha === 1, x: ((bb.x - w.x) * z) / dpr, y: ((bb.y - w.y) * z) / dpr, w: (bb.width * z) / dpr, h: (bb.height * z) / dpr, levelL: g.cameras.main.x / dpr, levelR: (g.cameras.main.x + g.cameras.main.width) / dpr };
+  });
+  log(rb.visible && rb.w >= 44 && rb.h >= 44 && rb.x >= 0 && rb.y >= 0 && rb.x + rb.w <= 844 && rb.y + rb.h <= 390 && (rb.x >= rb.levelR - 1 || rb.x + rb.w <= rb.levelL + 1),
+    'phone landscape: restart button is visible, ≥44 px, outside the level area', `${rb.w.toFixed(0)}×${rb.h.toFixed(0)} css px at (${rb.x.toFixed(0)}, ${rb.y.toFixed(0)})`);
   allErrors.push(...p.errors);
   await p.ctx.close();
 

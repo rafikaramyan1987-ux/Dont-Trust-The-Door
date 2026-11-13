@@ -77,8 +77,8 @@ export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks 
 }
 
 /** Replay recorded input (no conditions) and report the outcome. */
-export async function replay(page, level, rec, { extra = 90, render = false, checkpoint = false } = {}) {
-  return page.evaluate(({ level, rec, extra, render, checkpoint }) => {
+export async function replay(page, level, rec, { extra = 90, render = false, checkpoint = false, hintAt = -1 } = {}) {
+  return page.evaluate(({ level, rec, extra, render, checkpoint, hintAt }) => {
     const T = window.__DTTD;
     T.setManual(true);
     T.start(level, null, checkpoint);
@@ -90,7 +90,9 @@ export async function replay(page, level, rec, { extra = 90, render = false, che
     const d0 = T.state().deathsLevel;
     let s;
     let firstDeathTick = -1, deathCause = '';
+    let hinted = null;
     for (const [n, k] of rec) for (let i = 0; i < n; i++) {
+      if (hintAt >= 0 && !hinted && T.state().levelTick >= hintAt) { T.hint(); hinted = T.state(); }
       if (render) T.hold(k, 1); else T.sim(k, 1);
       s = T.state();
       if (firstDeathTick < 0 && s.state === 'dead') { firstDeathTick = s.levelTick; deathCause = s.lastDeath; }
@@ -98,6 +100,6 @@ export async function replay(page, level, rec, { extra = 90, render = false, che
     }
     for (let i = 0; i < extra && s.state === 'play'; i++) { if (render) T.hold('', 1); else T.sim('', 1); s = T.state(); }
     T.release();
-    return { final: s, died: s.deathsLevel > d0, deaths: s.deathsLevel - d0, firstDeathTick, deathCause };
-  }, { level, rec, extra, render, checkpoint });
+    return { final: s, died: s.deathsLevel > d0, deaths: s.deathsLevel - d0, firstDeathTick, deathCause, hinted };
+  }, { level, rec, extra, render, checkpoint, hintAt });
 }
