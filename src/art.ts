@@ -4,6 +4,7 @@
 
 import Phaser from 'phaser';
 import { PALETTES, Palette, TILE, FONT } from './config';
+import { t } from './i18n';
 
 export const RES = 2;
 const OUT = '#2b2d42';
@@ -320,6 +321,13 @@ function drawDoor(ctx: C2D, face: DoorFace, fake = false): void {
   }
 }
 
+/** The EXIT sign on the doors, in the current language (redrawn when it changes). */
+export function makeExitSign(scene: Phaser.Scene): void {
+  const [c, ctx] = canvas(56, 24);
+  drawExitSign(ctx, t('ui.exitSign'));
+  add(scene, 'exit-sign', c);
+}
+
 function drawExitSign(ctx: C2D, text = 'EXIT'): void {
   rr(ctx, 2, 2, 52, 20, 7);
   const g = ctx.createLinearGradient(0, 2, 0, 22);
@@ -330,7 +338,9 @@ function drawExitSign(ctx: C2D, text = 'EXIT'): void {
   ctx.lineWidth = 3;
   ctx.strokeStyle = OUT;
   ctx.stroke();
-  ctx.font = `900 13px ${FONT}`;
+  let size = 13;
+  ctx.font = `900 ${size}px ${FONT}`;
+  while (size > 7 && ctx.measureText(text).width > 46) { size -= 0.5; ctx.font = `900 ${size}px ${FONT}`; }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';
@@ -611,6 +621,12 @@ function drawIcon(ctx: C2D, kind: string): void {
       for (const [x1, y1, x2, y2] of [[3, 13, 0.5, 13], [29, 13, 31.5, 13], [6, 4, 4, 2], [26, 4, 28, 2]]) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
       break;
     }
+    case 'globe': {
+      ellipse(ctx, 16, 16, 12, 12); ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      ellipse(ctx, 16, 16, 5.5, 12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(4, 16); ctx.lineTo(28, 16); ctx.moveTo(6.5, 9.5); ctx.lineTo(25.5, 9.5); ctx.moveTo(6.5, 22.5); ctx.lineTo(25.5, 22.5); ctx.stroke();
+      break;
+    }
     case 'star': {
       ctx.beginPath();
       for (let i = 0; i < 10; i++) {
@@ -808,6 +824,78 @@ function shade(hex: string, amt: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Props for the newer traps: conveyor chevrons, turret, frog, bird, storm cloud,
+// lightning, darkness veil, screen smudge and the off-screen arrow.
+
+function drawTrapProps(scene: Phaser.Scene): void {
+  let c: HTMLCanvasElement, ctx: C2D;
+  [c, ctx] = canvas(20, 12);
+  ctx.strokeStyle = '#fff6d5'; ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.moveTo(4, 2); ctx.lineTo(10, 6); ctx.lineTo(4, 10); ctx.moveTo(11, 2); ctx.lineTo(17, 6); ctx.lineTo(11, 10); ctx.stroke();
+  add(scene, 'chevron', c);
+
+  [c, ctx] = canvas(24, 28);
+  rr(ctx, 2, 4, 20, 20, 6); ctx.fillStyle = '#3b3f58'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = OUT; ctx.stroke();
+  ellipse(ctx, 8, 14, 5, 5); ctx.fillStyle = '#111'; ctx.fill();
+  ctx.fillStyle = '#ff5a5a'; ellipse(ctx, 16, 10, 2.5, 2.5); ctx.fill();
+  add(scene, 'turret-mouth', c);
+
+  // copycat frog (spiky, deadly)
+  [c, ctx] = canvas(TILE, TILE);
+  ctx.fillStyle = '#c9cfe0';
+  for (let i = 0; i < 5; i++) { const x = 6 + i * 7; ctx.beginPath(); ctx.moveTo(x - 4, 16); ctx.lineTo(x, 4); ctx.lineTo(x + 4, 16); ctx.closePath(); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke(); }
+  ellipse(ctx, 20, 25, 16, 12); ctx.fillStyle = '#58c25a'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = OUT; ctx.stroke();
+  for (const ex of [12, 28]) { ellipse(ctx, ex, 17, 5, 5); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ellipse(ctx, ex, 17, 2, 2); ctx.fillStyle = OUT; ctx.fill(); }
+  ctx.beginPath(); ctx.moveTo(12, 30); ctx.quadraticCurveTo(20, 35, 28, 30); ctx.stroke();
+  add(scene, 'frog', c);
+
+  // homing spike bird
+  [c, ctx] = canvas(TILE, TILE);
+  ctx.fillStyle = '#8c93ad';
+  ctx.beginPath(); ctx.moveTo(4, 20); ctx.lineTo(14, 4); ctx.lineTo(20, 16); ctx.lineTo(26, 4); ctx.lineTo(36, 20); ctx.closePath(); ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
+  ellipse(ctx, 20, 24, 11, 10); ctx.fillStyle = '#e05a7a'; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.moveTo(18, 27); ctx.lineTo(22, 27); ctx.lineTo(20, 36); ctx.closePath(); ctx.fill(); ctx.stroke();
+  for (const ex of [16, 24]) { ellipse(ctx, ex, 22, 2.4, 2.4); ctx.fillStyle = '#fff'; ctx.fill(); }
+  add(scene, 'bird', c);
+
+  // storm cloud and lightning bolt
+  [c, ctx] = canvas(140, 70);
+  ctx.fillStyle = '#5b6077'; ctx.strokeStyle = OUT; ctx.lineWidth = 4;
+  for (const [x, y, r] of [[34, 42, 22], [62, 30, 28], [96, 38, 24], [116, 48, 16], [70, 50, 22]]) { ellipse(ctx, x, y, r, r * 0.85); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ellipse(ctx, 60, 24, 14, 6); ctx.fill();
+  add(scene, 'storm', c);
+  [c, ctx] = canvas(40, 540);
+  ctx.fillStyle = 'rgba(255,242,122,0.35)'; ctx.fillRect(4, 0, 32, 540);
+  ctx.strokeStyle = '#fff27a'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(20, 0);
+  for (let y = 0; y <= 540; y += 30) ctx.lineTo(y % 60 ? 30 : 10, y);
+  ctx.stroke();
+  add(scene, 'bolt', c);
+
+  // darkness veil: opaque everywhere except a soft round hole in the middle.
+  // 750 px texture shown 2.2–4× (the game scales it), so it always covers the screen.
+  [c, ctx] = canvas(750, 750, 1);
+  ctx.fillStyle = 'rgba(12,10,26,0.97)'; ctx.fillRect(0, 0, 750, 750);
+  ctx.globalCompositeOperation = 'destination-out';
+  const g = ctx.createRadialGradient(375, 375, 25, 375, 375, 60);
+  g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 750, 750);
+  ctx.globalCompositeOperation = 'source-over';
+  add(scene, 'veil', c);
+
+  // a big greasy smudge stuck to the screen
+  [c, ctx] = canvas(520, 420);
+  ctx.fillStyle = '#6b5a4a';
+  for (const [x, y, r] of [[200, 210, 150], [320, 170, 130], [300, 290, 120], [150, 300, 90], [400, 260, 90], [250, 110, 90]]) { ellipse(ctx, x, y, r, r * 0.9); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ellipse(ctx, 230, 150, 60, 25); ctx.fill();
+  add(scene, 'smudge', c);
+
+  // off-screen arrow (points right; rotated toward the hero)
+  [c, ctx] = canvas(56, 48);
+  ctx.beginPath(); ctx.moveTo(4, 14); ctx.lineTo(30, 14); ctx.lineTo(30, 4); ctx.lineTo(52, 24); ctx.lineTo(30, 44); ctx.lineTo(30, 34); ctx.lineTo(4, 34); ctx.closePath();
+  ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = OUT; ctx.stroke();
+  add(scene, 'edge-arrow', c);
+}
 
 export function generateTextures(scene: Phaser.Scene): void {
   let c: HTMLCanvasElement, ctx: C2D;
@@ -822,7 +910,7 @@ export function generateTextures(scene: Phaser.Scene): void {
   for (const f of ['idle', 'hehe', 'wink', 'run', 'tired', 'chomp'] as DoorFace[]) {
     [c, ctx] = canvas(DOOR_W, DOOR_H); drawDoor(ctx, f); add(scene, `door-${f}`, c);
   }
-  [c, ctx] = canvas(56, 24); drawExitSign(ctx); add(scene, 'exit-sign', c);
+  makeExitSign(scene);
   [c, ctx] = canvas(14, 18); drawLeg(ctx); add(scene, 'door-leg', c);
 
   [c, ctx] = canvas(TILE, TILE); drawSpikes(ctx); add(scene, 'spike', c);
@@ -838,9 +926,11 @@ export function generateTextures(scene: Phaser.Scene): void {
   [c, ctx] = canvas(32, 32); drawSkull(ctx); add(scene, 'skull', c);
   [c, ctx] = canvas(40, 80); drawFlag(ctx, false); add(scene, 'flag', c);
   [c, ctx] = canvas(40, 80); drawFlag(ctx, true); add(scene, 'flag-on', c);
-  for (const k of ['pause', 'restart', 'sound', 'mute', 'left', 'right', 'up', 'menu', 'play', 'lock', 'star', 'bulb']) {
+  for (const k of ['pause', 'restart', 'sound', 'mute', 'left', 'right', 'up', 'menu', 'play', 'lock', 'star', 'bulb', 'globe']) {
     [c, ctx] = canvas(32, 32); drawIcon(ctx, k); add(scene, `icon-${k}`, c);
   }
+
+  drawTrapProps(scene);
 
   // particles
   [c, ctx] = canvas(12, 12); ellipse(ctx, 6, 6, 5, 5); ctx.fillStyle = '#fff'; ctx.fill(); add(scene, 'p-dot', c);

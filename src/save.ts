@@ -11,10 +11,12 @@ export interface SaveData {
   muted: boolean;
   /** The level-1 control instructions have been shown. */
   tutorialSeen: boolean;
+  /** Chosen language code (null: follow the browser language). */
+  lang: string | null;
 }
 
 function fresh(): SaveData {
-  return { unlocked: 1, totalDeaths: 0, levelDeaths: {}, completed: {}, muted: false, tutorialSeen: false };
+  return { unlocked: 1, totalDeaths: 0, levelDeaths: {}, completed: {}, muted: false, tutorialSeen: false, lang: null };
 }
 
 let data: SaveData = load();
@@ -32,6 +34,7 @@ function load(): SaveData {
       completed: typeof parsed.completed === 'object' && parsed.completed ? parsed.completed : base.completed,
       muted: !!parsed.muted,
       tutorialSeen: !!parsed.tutorialSeen,
+      lang: typeof parsed.lang === 'string' ? parsed.lang : null,
     };
   } catch {
     return fresh();
@@ -64,6 +67,10 @@ export const Save = {
   setTutorialSeen(): void {
     if (data.tutorialSeen) return;
     data.tutorialSeen = true;
+    persist();
+  },
+  setLang(code: string): void {
+    data.lang = code;
     persist();
   },
   setMuted(m: boolean): void {

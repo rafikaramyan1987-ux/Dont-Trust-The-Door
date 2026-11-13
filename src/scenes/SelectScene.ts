@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { WORLD_W, PALETTES } from '../config';
 import { applyLayout } from '../layout';
-import { Button, label } from '../ui';
+import { Button, label, fitText } from '../ui';
+import { t } from '../i18n';
 import { LEVELS } from '../levels';
 import { Save } from '../save';
 import { Audio } from '../audio';
@@ -26,7 +27,7 @@ export class SelectScene extends Phaser.Scene {
     const off = Input.on((c) => { if (c === 'back' || c === 'pause') this.scene.start('Title'); });
     this.events.once('shutdown', () => { this.scale.off('resize', fit); off(); });
 
-    label(this, WORLD_W / 2, 80, 'CHOOSE A LEVEL', 56, '#fff6d5', 12);
+    fitText(label(this, WORLD_W / 2, 80, t('ui.chooseLevel'), 56, '#fff6d5', 12), 1000);
     const s = Save.get();
     const colors = PALETTES.map((p) => p.accent);
     LEVELS.forEach((lv, i) => {
@@ -46,11 +47,11 @@ export class SelectScene extends Phaser.Scene {
         b.add(label(this, 4, 34, String(d), 20, '#ffffff', 5).setOrigin(0, 0.5));
         if (s.completed[String(lv.id)]) b.add(this.add.image(54, -50, 'icon-star').setScale(1.1 / RES).setTint(0xffd23f));
       }
-      label(this, x, y + 86, locked ? '???' : lv.name, 18, '#2b2d42', 0).setAlpha(0.8);
+      fitText(label(this, x, y + 86, locked ? '???' : t(lv.name), 18, '#2b2d42', 0), 190).setAlpha(0.8);
     });
-    new Button(this, 110, 660, { w: 170, h: 60, icon: 'left', text: 'Back', fontSize: 24, color: '#ff8a5b' }, () => this.scene.start('Title'));
+    new Button(this, 120, 660, { w: 190, h: 60, icon: 'left', text: t('ui.back'), fontSize: 24, color: '#ff8a5b' }, () => this.scene.start('Title'));
     if (new URLSearchParams(window.location.search).has('unlock')) Save.unlockAll(LEVELS.length);
-    this.add.image(WORLD_W - 190, 660, 'skull').setScale(1 / RES);
-    label(this, WORLD_W - 160, 660, `Total deaths: ${s.totalDeaths}`, 24, '#fff6d5', 7).setOrigin(0, 0.5);
+    this.add.image(WORLD_W - 360, 660, 'skull').setScale(1 / RES);
+    fitText(label(this, WORLD_W - 330, 660, t('ui.deathsTotal', { n: s.totalDeaths }), 24, '#fff6d5', 7).setOrigin(0, 0.5), 300);
   }
 }

@@ -11,7 +11,8 @@ import { LEVELS } from './levels';
 import { Hero } from './game/Hero';
 import { label } from './ui';
 import { applyLayout } from './layout';
-import { RES } from './art';
+import { RES, makeExitSign } from './art';
+import { setLang, getLang } from './i18n';
 
 /** Test/marketing only: the hero's four expressions side by side. */
 class ShowcaseScene extends Phaser.Scene {
@@ -110,10 +111,12 @@ export function installTestHooks(game: Phaser.Game): void {
     kill() { scene().debugKill(); },
     snapCamera() { scene().debugSnapCamera(); },
     hint() { scene().debugHint(); },
+    /** Switch language (as the picker does) and return the code in use. */
+    lang(code?: string) { if (code) { Save.setLang(code); setLang(code); makeExitSign(game.scene.getScene('Boot')); } return getLang(); },
     restart() { scene().restartLevel(); },
     /** Start a level; with `replay` the bot's recorded inputs drive it from tick 0.
      *  With `checkpoint` the attempt starts at the level's checkpoint flag. */
-    start(level: number, replay?: [number, string][] | null, checkpoint = false) {
+    start(level: number, replay?: [number, string][] | null, checkpoint: boolean | number = false) {
       game.scene.getScenes(true).forEach((s) => { if (s.scene.key !== 'Game') game.scene.stop(s.scene.key); });
       const g = game.scene.getScene('Game');
       const data = { level, replay: replay ? expandReplay(replay) : undefined, checkpoint };

@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { WORLD_W, PALETTES, TILE } from '../config';
 import { applyLayout, Layout } from '../layout';
-import { Button, label } from '../ui';
+import { Button, label, fitText } from '../ui';
+import { t } from '../i18n';
+import { openLanguagePicker, currentLangName } from '../langPicker';
 import { Hero } from '../game/Hero';
 import { Door } from '../game/Door';
 import { Audio } from '../audio';
@@ -48,15 +50,18 @@ export class TitleScene extends Phaser.Scene {
         this.tweens.add({ targets: t, y: t.y - 10, duration: 700, delay: i * 70 + li * 300, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
       });
     });
-    label(this, WORLD_W / 2, 330, 'a troll platformer where the level betrays you', 24, '#2b2d42', 0).setAlpha(0.75);
+    fitText(label(this, WORLD_W / 2, 330, t('ui.tagline'), 24, '#2b2d42', 0), 900).setAlpha(0.75);
 
     this.hero = new Hero(this, 330, 15 * TILE + 1).setScale(2.2);
     this.door = new Door(this, 960, 15 * TILE, false, false).setScale(2);
     this.time.addEvent({ delay: 2200, loop: true, callback: () => this.door.wink() });
     this.time.addEvent({ delay: 2200, startAt: 1100, loop: true, callback: () => this.tweens.add({ targets: this.hero, y: this.hero.y - 30, duration: 180, yoyo: true, ease: 'Quad.Out' }) });
 
-    new Button(this, WORLD_W / 2, 450, { w: 300, h: 92, icon: 'play', text: 'PLAY', fontSize: 46, color: '#6fd36b' }, () => this.play());
-    new Button(this, WORLD_W / 2, 560, { w: 220, h: 62, icon: 'menu', text: 'Levels', fontSize: 26, color: '#5b8cff' }, () => this.scene.start('Select'));
+    new Button(this, WORLD_W / 2, 450, { w: 320, h: 92, icon: 'play', text: t('ui.play'), fontSize: 46, color: '#6fd36b' }, () => this.play()).setName('play');
+    new Button(this, WORLD_W / 2 - 140, 560, { w: 250, h: 62, icon: 'menu', text: t('ui.levels'), fontSize: 26, color: '#5b8cff' }, () => this.scene.start('Select')).setName('levels');
+    new Button(this, WORLD_W / 2 + 140, 560, { w: 250, h: 62, icon: 'globe', text: currentLangName(), fontSize: 24, color: '#41c6c0' }, () => {
+      openLanguagePicker(this, null, () => this.scene.restart());
+    }).setName('language');
     this.muteBtn = new Button(this, WORLD_W - 60, 50, { w: 64, h: 58, icon: Audio.muted ? 'mute' : 'sound', color: '#ff8a5b' }, () => {
       Audio.unlock();
       this.muteBtn.setIcon(Audio.toggleMute() ? 'mute' : 'sound');
@@ -66,7 +71,7 @@ export class TitleScene extends Phaser.Scene {
       this.add.image(70, 50, 'skull').setScale(1 / RES);
       label(this, 100, 50, String(s.totalDeaths), 30, '#fff6d5', 7).setOrigin(0, 0.5);
     }
-    label(this, WORLD_W / 2, 690, 'Arrows / WASD to move · Space to jump · Esc to pause', 18, '#2b2d42', 0).setAlpha(0.6);
+    fitText(label(this, WORLD_W / 2, 690, t('ui.controlsHelp'), 18, '#2b2d42', 0), 1100).setAlpha(0.6);
 
     this.relayout();
     this.scale.on('resize', this.relayout, this);

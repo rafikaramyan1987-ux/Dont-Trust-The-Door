@@ -16,6 +16,7 @@
     "levels": "node tools/level-builder/build.mjs && node tests/validate-levels.mjs"
   },
   "dependencies": {
+    "@fontsource/nunito": "5.3.0",
     "phaser": "3.90.0"
   },
   "devDependencies": {
