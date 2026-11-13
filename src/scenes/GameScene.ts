@@ -30,7 +30,8 @@ function spikeHit(tx: number, ty: number, d: Dir): R {
 
 interface Spike { tx: number; ty: number; dir: Dir; img: Phaser.GameObjects.Image; group: GroupRT | null; extend: number }
 interface Coin { tx: number; ty: number; img: Phaser.GameObjects.Image; group: GroupRT | null; taken: boolean; spiky: boolean }
-interface Pad { tx: number; ty: number; img: Phaser.GameObjects.Image; group: GroupRT | null; squashT: number }
+interface Pad { tx: number; ty: number; img: Phaser.GameObjects.Image; group: GroupRT | null; squashT: number; tex: string }
+interface Ball { tx: number; ty: number; img: Phaser.GameObjects.Image; group: GroupRT | null }
 
 interface MoveState {
   fx: number; fy: number; tx: number; ty: number; t: number; dur: number;
@@ -50,7 +51,10 @@ interface GroupRT {
   shakeT: number;
   fallV: number;
   move: MoveState | null;
-  chase: { vx: number; vy: number; untilX?: number } | null;
+  chase: { vx: number; vy: number; untilX?: number; untilY?: number } | null;
+  /** Movement this tick (moving platforms carry the hero). */
+  dx: number;
+  dy: number;
   deadlyMove: boolean;
   /** A deadly move just finished: still deadly for this one tick (the landing frame). */
   deadlyEnd: boolean;
@@ -76,6 +80,15 @@ export interface Snapshot {
   worldW: number;
   controlsFlipped: boolean;
   hudDeaths: string;
+  ctrlMode: string;
+  gScale: number;
+  camFrozen: boolean;
+  camFlip: boolean;
+  camZoom: number;
+  hintUsed: boolean;
+  hint: string;
+  /** Group offsets/visibility, e.g. g.c = [ox, oy, visible] (bot plans time moving parts). */
+  g: Record<string, [number, number, number]>;
   cpX: number;
   zoom: number;
   viewTiles: number;
@@ -123,7 +136,8 @@ export class GameScene extends Phaser.Scene {
   private doorSpeed = 0;
   private doorWait = 0;
   private doorVx = 0;
-  private fakeDoors: { door: Door; x: number; y: number; flipped: boolean }[] = [];
+  private fakeDoors: { door: Door; x: number; y: number; flipped: boolean; group: GroupRT | null }[] = [];
+  private balls: Ball[] = [];
   private spikes: Spike[] = [];
   private coins: Coin[] = [];
   private pads: Pad[] = [];
@@ -146,12 +160,32 @@ export class GameScene extends Phaser.Scene {
   /** Troll ids that have fired at least once since the level was entered. */
   trollsFired = new Set<string>();
   private ctrlFlip = false;
+  /** Control mode set by traps: normal, swapped, jump disabled, or forced running. */
+  private ctrlMode: 'normal' | 'flip' | 'nojump' | 'autorun' = 'normal';
+  /** Gravity strength multiplier (low / heavy gravity traps). */
+  private gScale = 1;
+  /** Ticks during which air control is off after a sideways spring. */
+  private launchLock = 0;
+  /** Camera tricks. */
+  private camFrozen = false;
+  private baseZoom = 1;
+  private camFlip = false;
+  private camZoomMul = 1;
+  private fakeClearUI: Phaser.GameObjects.Container | null = null;
+  /** Group the hero is standing on (moving platforms carry the hero). */
+  private ride: GroupRT | null = null;
   private camX = 0;
   private camY = 0;
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private worldLayer!: Phaser.GameObjects.Layer;
   private uiLayer!: Phaser.GameObjects.Layer;
-  private flipText!: Phaser.GameObjects.Text;
+  private hintBtn!: Button;
+  /** The level's one hint has been spent (resets only when the level is started anew). */
+  hintUsed = false;
+  hintShown: { id: string; text: string } | null = null;
+  private hintBox: Phaser.GameObjects.Container | null = null;
+  private tutorialMaxX = 0;
+  private touches = new Map<number, keyof Keys>();
 
   // presentation
   private bg!: Phaser.GameObjects.Image;
@@ -167,7 +201,6 @@ export class GameScene extends Phaser.Scene {
   private muteBtn!: Button;
   private touchUI!: Phaser.GameObjects.Container;
   private touchBtns: { key: keyof Keys; img: Phaser.GameObjects.Container; zone: R }[] = [];
-  private pointers = new Map<number, keyof Keys | null>();
   private overlay: Phaser.GameObjects.Container | null = null;
   private emitDeath!: Phaser.GameObjects.Particles.ParticleEmitter;
   private emitDust!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -183,6 +216,10 @@ export class GameScene extends Phaser.Scene {
   init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean }): void {
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
     this.cpActive = !!data.checkpoint;
+    this.hintUsed = false;
+    this.hintShown = null;
+    this.hintBox = null;
+    this.touches = new Map();
     this.deathXs = [];
     this.trollsFired = new Set();
     this.ctrlFlip = false;
@@ -197,6 +234,7 @@ export class GameScene extends Phaser.Scene {
     this.spikes = [];
     this.coins = [];
     this.pads = [];
+    this.balls = [];
     this.triggers = [];
     this.scheduled = [];
     this.fired = new Set();
@@ -209,7 +247,6 @@ export class GameScene extends Phaser.Scene {
     this.bubbles = [];
     this.sysButtons = [];
     this.touchBtns = [];
-    this.pointers = new Map();
   }
 
   create(): void {
@@ -275,19 +312,21 @@ export class GameScene extends Phaser.Scene {
 
     // system buttons: in the right pillar on touch layouts, top-right otherwise
     const P = L.pillar;
+    const [hint, restart, mute, pause] = this.sysButtons;
     if (P > 60) {
-      // restart + pause in the right pillar, mute in the left pillar under the level name
+      // right pillar: a big restart + pause; left pillar: level name, sound, hint
       const size = Math.min(72, P * 0.4);
       const top = Math.max(L.top, 0) + size * 0.7;
-      const [restart, mute, pause] = this.sysButtons;
       for (const b of this.sysButtons) b.setScale(size / 64);
-      restart.setPosition(WORLD_W + P / 2 - size * 0.58, top);
-      pause.setPosition(WORLD_W + P / 2 + size * 0.58, top);
-      mute.setPosition(-P / 2, top + size * 1.25);
+      restart.setScale((size / 64) * 1.15);
+      restart.setPosition(WORLD_W + P / 2 - size * 0.62, top);
+      pause.setPosition(WORLD_W + P / 2 + size * 0.62, top);
+      mute.setPosition(-P / 2 - size * 0.58, top + size * 1.25);
+      hint.setPosition(-P / 2 + size * 0.58, top + size * 1.25);
     } else {
-      this.sysButtons.forEach((b, i) => {
-        b.setScale(1);
-        b.setPosition(WORLD_W - 46 - (2 - i) * 72, 40);
+      [hint, restart, mute, pause].forEach((b, i) => {
+        b.setScale(i === 1 ? 1.15 : 1);
+        b.setPosition(WORLD_W - 46 - (3 - i) * 74, 40);
       });
     }
     this.levelText.setPosition(P > 60 ? -P / 2 : 24, P > 60 ? Math.max(L.top, 0) + 34 : 30);
@@ -311,7 +350,8 @@ export class GameScene extends Phaser.Scene {
     cam.setViewport(px, 0, vw, H);
     const tilesAcross = L.touch ? 22 : 32;
     const zoom = Math.max(H / WORLD_H, vw / (tilesAcross * TILE));
-    cam.setZoom(zoom);
+    this.baseZoom = zoom;
+    cam.setZoom(zoom * this.camZoomMul);
     cam.setBounds(0, 0, this.worldW, WORLD_H);
     const pad = 200;
     this.bg.setPosition(vw / 2, H / 2).setDisplaySize(vw / zoom + pad, H / zoom + pad);
@@ -340,6 +380,50 @@ export class GameScene extends Phaser.Scene {
     this.hills.tilePositionX = cam.scrollX * 0.25 * RES;
   }
 
+  /** Camera tricks used by the "the camera lies" traps (presentation only). */
+  private cameraTrick(t: 'freeze' | 'follow' | 'flip' | 'unflip' | 'zoom' | 'unzoom' | 'reset'): void {
+    const cam = this.cameras.main;
+    if (t === 'reset') {
+      this.camFrozen = false;
+      this.camFlip = false;
+      this.camZoomMul = 1;
+      this.tweens.killTweensOf(cam);
+      cam.setRotation(0);
+      return;
+    }
+    if (t === 'freeze') this.camFrozen = true;
+    if (t === 'follow') this.camFrozen = false;
+    if (t === 'flip' || t === 'unflip') {
+      this.camFlip = t === 'flip';
+      this.tweens.add({ targets: cam, rotation: this.camFlip ? Math.PI : 0, duration: 380, ease: 'Sine.InOut' });
+      this.sfx('flip');
+    }
+    if (t === 'zoom') this.camZoomMul = 2.3;
+    if (t === 'unzoom') this.camZoomMul = 1;
+  }
+
+  /** A fake "level clear" card: looks real, blocks the view, does not stop the game. */
+  private showFakeClear(on: boolean): void {
+    if (!on) {
+      this.fakeClearUI?.destroy();
+      this.fakeClearUI = null;
+      return;
+    }
+    if (this.fakeClearUI) return;
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    const c = this.add.container(0, 0).setDepth(180);
+    c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
+    c.add(label(this, cx, cy - 130, `LEVEL ${this.levelNum} CLEAR`, 30, '#6fd36b', 7));
+    c.add(label(this, cx, cy - 64, 'Too easy!', 46, '#ffd23f', 10));
+    c.add(label(this, cx, cy + 10, `Deaths this level: ${this.deathsLevel}`, 28, '#ffffff', 7));
+    const nx = new Button(this, cx + 150, cy + 130, { w: 190, h: 72, icon: 'play', text: 'Next', fontSize: 30, color: '#6fd36b' }, () => this.say('lol', 'hero', 40));
+    c.add(nx);
+    this.uiLayer.add(c);
+    this.cameras.main.ignore([c, nx]);
+    this.fakeClearUI = c;
+    this.sfx('win');
+  }
+
   private fitDim(): void {
     if (!this.overlay) return;
     const d = this.overlay.getByName('dim') as Phaser.GameObjects.Rectangle | null;
@@ -355,18 +439,18 @@ export class GameScene extends Phaser.Scene {
     this.deathText = label(this, WORLD_W / 2 + 8, 34, '0', 40, '#fff6d5', 9).setOrigin(0, 0.5);
     this.quip = label(this, WORLD_W / 2, 84, '', 26, '#ffd23f', 7).setAlpha(0);
     this.levelText = label(this, 24, 30, `${this.levelNum}. ${this.lvl.name}`, 22, '#fff6d5', 6).setOrigin(0, 0.5);
-    this.flipText = label(this, WORLD_W / 2, 124, '⇄ CONTROLS FLIPPED', 22, '#ff6f91', 6).setVisible(false);
-    this.hud.add([this.deathIcon, this.deathText, this.quip, this.levelText, this.flipText]);
+    this.hud.add([this.deathIcon, this.deathText, this.quip, this.levelText]);
     this.uiLayer.add(this.hud);
-    const mk = (icon: string, fn: () => void) => {
-      const b = new Button(this, 0, 0, { w: 60, h: 56, icon, color: '#5b8cff', radius: 16 }, fn);
+    const mk = (icon: string, fn: () => void, color = '#5b8cff') => {
+      const b = new Button(this, 0, 0, { w: 60, h: 56, icon, color, radius: 16 }, fn);
       b.setDepth(101);
       this.uiLayer.add(b);
       this.cameras.main.ignore(b);
       this.sysButtons.push(b);
       return b;
     };
-    mk('restart', () => this.restartLevel());
+    this.hintBtn = mk('bulb', () => this.useHint(), '#f2b705');
+    mk('restart', () => this.restartLevel(), '#ff6a3d');
     this.muteBtn = mk(Audio.muted ? 'mute' : 'sound', () => this.toggleMute());
     mk('pause', () => this.togglePause());
     this.updateDeathText(false);
@@ -404,25 +488,63 @@ export class GameScene extends Phaser.Scene {
     mk('left', 'left');
     mk('right', 'right');
     mk('jump', 'up');
-    this.input.addPointer(3);
-    const handle = (p: Phaser.Input.Pointer) => {
-      if (!this.lay?.touch) return;
-      const wp = this.uiCam.getWorldPoint(p.x, p.y);
-      let hit: keyof Keys | null = null;
-      if (p.isDown) for (const b of this.touchBtns) if (wp.x >= b.zone.x && wp.x <= b.zone.x + b.zone.w && wp.y >= b.zone.y && wp.y <= b.zone.y + b.zone.h) hit = b.key;
-      this.pointers.set(p.id, hit);
+    // Native touch handling (more reliable than generic pointers on phones): every finger
+    // "captures" the button it first touched and keeps it until it is lifted, so a rolling
+    // thumb never releases ▲ early (a released jump is cut short). ◀ and ▶ may slide
+    // into each other like a d-pad.
+    const canvas = this.game.canvas;
+    const toUi = (t: Touch) => {
+      const r = canvas.getBoundingClientRect();
+      const sx = this.scale.width / r.width, sy = this.scale.height / r.height;
+      return this.uiCam.getWorldPoint((t.clientX - r.left) * sx, (t.clientY - r.top) * sy);
+    };
+    const zoneAt = (t: Touch): keyof Keys | null => {
+      const wp = toUi(t);
+      for (const b of this.touchBtns) if (wp.x >= b.zone.x && wp.x <= b.zone.x + b.zone.w && wp.y >= b.zone.y && wp.y <= b.zone.y + b.zone.h) return b.key;
+      return null;
+    };
+    const onStart = (e: TouchEvent) => {
+      Audio.unlock();
+      if (!this.lay?.touch || this.overlay) return;
+      for (const t of Array.from(e.changedTouches)) {
+        const k = zoneAt(t);
+        if (k) this.touches.set(t.identifier, k);
+      }
       this.syncTouch();
     };
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { Audio.unlock(); handle(p); });
-    this.input.on('pointermove', handle);
-    this.input.on('pointerup', (p: Phaser.Input.Pointer) => { this.pointers.delete(p.id); this.syncTouch(); });
-    this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => { this.pointers.delete(p.id); this.syncTouch(); });
-    this.events.once('shutdown', () => { Input.touch.left = Input.touch.right = Input.touch.jump = false; });
+    const onMove = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) {
+        const cur = this.touches.get(t.identifier);
+        if (cur === 'left' || cur === 'right') {
+          const k = zoneAt(t);
+          if (k === 'left' || k === 'right') this.touches.set(t.identifier, k);
+        }
+      }
+      this.syncTouch();
+    };
+    const onEnd = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) this.touches.delete(t.identifier);
+      this.syncTouch();
+    };
+    const opts: AddEventListenerOptions = { passive: true };
+    canvas.addEventListener('touchstart', onStart, opts);
+    canvas.addEventListener('touchmove', onMove, opts);
+    canvas.addEventListener('touchend', onEnd, opts);
+    canvas.addEventListener('touchcancel', onEnd, opts);
+    this.input.on('pointerdown', () => Audio.unlock());
+    this.events.once('shutdown', () => {
+      canvas.removeEventListener('touchstart', onStart);
+      canvas.removeEventListener('touchmove', onMove);
+      canvas.removeEventListener('touchend', onEnd);
+      canvas.removeEventListener('touchcancel', onEnd);
+      this.touches.clear();
+      Input.touch.left = Input.touch.right = Input.touch.jump = false;
+    });
   }
 
   private syncTouch(): void {
     const t = { left: false, right: false, jump: false };
-    this.pointers.forEach((k) => { if (k) t[k] = true; });
+    this.touches.forEach((k) => { t[k] = true; });
     Input.touch.left = t.left;
     Input.touch.right = t.right;
     Input.touch.jump = t.jump;
@@ -514,6 +636,7 @@ export class GameScene extends Phaser.Scene {
     this.spikes = [];
     this.coins = [];
     this.pads = [];
+    this.balls = [];
     this.triggers = [];
     this.scheduled = [];
     this.fired.clear();
@@ -546,6 +669,7 @@ export class GameScene extends Phaser.Scene {
     const spikeTiles: { tx: number; ty: number; ch: string }[] = [];
     const padTiles: { tx: number; ty: number }[] = [];
     const coinTiles: { tx: number; ty: number }[] = [];
+    const ballTiles: { tx: number; ty: number }[] = [];
 
     for (let ty = 0; ty < ROWS; ty++) {
       const row = map[ty] ?? '';
@@ -555,6 +679,7 @@ export class GameScene extends Phaser.Scene {
         else if (ch in SPIKE_DIR) spikeTiles.push({ tx, ty, ch });
         else if (ch === '=') padTiles.push({ tx, ty });
         else if (ch === 'o') coinTiles.push({ tx, ty });
+        else if (ch === '*') ballTiles.push({ tx, ty });
         else if (ch === 'P') this.spawn = { x: tx * TILE + TILE / 2, y: (ty + 1) * TILE };
         else if (ch === 'D') doorAt = { tx, ty };
         else if (ch === 'F') fakeAt.push({ tx, ty });
@@ -631,6 +756,7 @@ export class GameScene extends Phaser.Scene {
     for (const s of spikeTiles) this.addSpike(s.tx, s.ty, SPIKE_DIR[s.ch], null);
     for (const p of padTiles) this.addPad(p.tx, p.ty, null);
     for (const c of coinTiles) this.addCoin(c.tx, c.ty, null);
+    for (const c of ballTiles) this.addBall(c.tx, c.ty, null);
 
     // Doors
     const doorFlip = (tx: number, ty: number) => !isSolidAll(tx, ty + 1) && isSolidAll(tx, ty - 1);
@@ -643,7 +769,7 @@ export class GameScene extends Phaser.Scene {
     for (const f of fakeAt) {
       const fl = doorFlip(f.tx, f.ty);
       const x = f.tx * TILE + TILE / 2, y = fl ? f.ty * TILE : (f.ty + 1) * TILE;
-      this.fakeDoors.push({ door: this.track(new Door(this, x, y, true, fl).setDepth(2)), x, y, flipped: fl });
+      this.fakeDoors.push({ door: this.track(new Door(this, x, y, true, fl).setDepth(2)), x, y, flipped: fl, group: null });
     }
     this.doorPath = [];
     this.doorWait = 0;
@@ -656,15 +782,25 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Hints
-    for (const h of L.hints ?? []) {
-      const t = this.track(label(this, h.x * TILE + TILE / 2, h.y * TILE + TILE / 2, h.text, 24, '#ffffff', 6).setDepth(-5));
-      this.hints.push({ obj: t, after: h.afterDeaths ?? 0 });
-      t.setVisible(this.hintVisible(t.x, h.afterDeaths ?? 0));
+    // Only the level-1 control instructions exist, and they are shown once ever.
+    this.tutorialMaxX = 0;
+    if (!Save.get().tutorialSeen) {
+      for (const h of L.hints ?? []) {
+        const t = this.track(label(this, h.x * TILE + TILE / 2, h.y * TILE + TILE / 2, h.text, 24, '#ffffff', 6).setDepth(-5));
+        this.hints.push({ obj: t, after: 0 });
+        this.tutorialMaxX = Math.max(this.tutorialMaxX, (h.x + 4) * TILE);
+      }
     }
 
     // Player
     this.gdir = 1;
     this.ctrlFlip = false;
+    this.ctrlMode = 'normal';
+    this.gScale = 1;
+    this.launchLock = 0;
+    this.ride = null;
+    this.cameraTrick('reset');
+    this.showFakeClear(false);
     const start = this.cpActive && this.cp ? { x: this.cp.x + 2, y: this.cp.y } : this.spawn;
     this.player = this.track(this.add.zone(start.x, start.y - PHYS.bodyH / 2, PHYS.bodyW, PHYS.bodyH));
     this.physics.add.existing(this.player);
@@ -708,7 +844,6 @@ export class GameScene extends Phaser.Scene {
     this.slowmo = 0;
     this.lastVy = 0;
     this.applySlowmo();
-    this.flipText?.setVisible(false);
     if (this.lay) this.snapCamera();
   }
 
@@ -738,6 +873,9 @@ export class GameScene extends Phaser.Scene {
         this.hero?.setFlipped(this.gdir < 0);
       } else if ('controls' in a) {
         this.ctrlFlip = a.controls === 'flip';
+        this.ctrlMode = a.controls;
+      } else if ('gravityScale' in a) {
+        this.gScale = a.gravityScale;
       }
     }
   }
@@ -748,7 +886,7 @@ export class GameScene extends Phaser.Scene {
     const g: GroupRT = {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
-      shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false,
+      shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
     };
     this.groups.set(id, g);
     const t = def.tile as TileChar;
@@ -788,6 +926,17 @@ export class GameScene extends Phaser.Scene {
     } else if (t === 'o') {
       container.setDepth(3);
       for (const v of tiles) this.addCoin(v.tx, v.ty, g);
+    } else if (t === '*') {
+      container.setDepth(3);
+      for (const v of tiles) this.addBall(v.tx, v.ty, g);
+    } else if (t === 'F') {
+      container.setDepth(2);
+      for (const v of tiles) {
+        const x = v.tx * TILE + TILE / 2, y = (v.ty + 1) * TILE;
+        const d = new Door(this, x, y, true, false);
+        container.add(d);
+        this.fakeDoors.push({ door: d, x, y, flipped: false, group: g });
+      }
     }
     container.setVisible(g.visible);
   }
@@ -809,10 +958,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addPad(tx: number, ty: number, group: GroupRT | null): void {
-    const img = this.add.image(tx * TILE + TILE / 2, ty * TILE + TILE / 2, 'pad').setScale(1 / RES);
+    const def = group?.def;
+    const tex = def?.dud ? 'pad-dud' : def?.launch && def.launch[0] !== 0 ? 'pad-side' : 'pad';
+    const img = this.add.image(tx * TILE + TILE / 2, ty * TILE + TILE / 2, tex).setScale(1 / RES);
+    if (def?.launch && def.launch[0] < 0) img.setFlipX(true);
     if (group) group.container.add(img);
     else this.track(img.setDepth(1));
-    this.pads.push({ tx, ty, img, group, squashT: 0 });
+    this.pads.push({ tx, ty, img, group, squashT: 0, tex });
+  }
+
+  private addBall(tx: number, ty: number, group: GroupRT | null): void {
+    const img = this.add.image(tx * TILE + TILE / 2, ty * TILE + TILE / 2, 'ball').setScale(1 / RES);
+    if (group) group.container.add(img);
+    else this.track(img.setDepth(3));
+    this.balls.push({ tx, ty, img, group });
   }
 
   private addCoin(tx: number, ty: number, group: GroupRT | null): void {
@@ -865,6 +1024,11 @@ export class GameScene extends Phaser.Scene {
 
     this.controlPlayer(k, jumpPressed);
     this.updateGroups();
+    // moving platforms carry the hero standing on them
+    if (this.ride && this.ride.solid && this.ride.visible && (this.ride.dx || this.ride.dy)) {
+      this.player.x += this.ride.dx;
+      this.player.y += this.ride.dy;
+    }
     this.updateDoor();
     const w = this.physics.world;
     w.isPaused = false;
@@ -883,9 +1047,13 @@ export class GameScene extends Phaser.Scene {
     let vx = b.velocity.x;
     let vy = b.velocity.y;
     let dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
-    if (this.ctrlFlip) dir = -dir;
+    if (this.ctrlMode === 'flip') dir = -dir;
+    if (this.ctrlMode === 'autorun') dir = 1;
+    if (this.ctrlMode === 'nojump') jumpPressed = false;
     const gr = this.grounded;
-    if (dir !== 0) {
+    if (this.launchLock > 0) {
+      this.launchLock--;
+    } else if (dir !== 0) {
       const turning = vx !== 0 && Math.sign(vx) !== dir;
       const a = gr ? (turning ? PHYS.groundDecel : PHYS.groundAccel) : PHYS.airAccel;
       vx = approach(vx, dir * PHYS.maxRun, a * DT);
@@ -910,7 +1078,7 @@ export class GameScene extends Phaser.Scene {
       this.jumping = false;
     }
     if (vy * g >= 0) this.jumping = false;
-    const mul = vy * g > 0 ? PHYS.fallGravityMul : 1;
+    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale;
     vy += g * PHYS.gravity * mul * DT;
     if (vy * g > PHYS.maxFall) vy = PHYS.maxFall * g;
     b.setVelocity(vx, vy);
@@ -921,6 +1089,18 @@ export class GameScene extends Phaser.Scene {
     const b = this.pbody;
     this.wasGrounded = this.grounded;
     this.grounded = this.gdir > 0 ? b.blocked.down : b.blocked.up;
+    this.ride = null;
+    if (this.grounded) {
+      for (const g of this.groups.values()) {
+        if (!g.solid || !g.visible || !g.bodies.length) continue;
+        for (const z of g.bodies) {
+          const zb = z.body as Phaser.Physics.Arcade.Body;
+          const touching = this.gdir > 0 ? Math.abs(b.bottom - zb.top) <= 3 : Math.abs(b.top - zb.bottom) <= 3;
+          if (touching && b.right > zb.left + 1 && b.left < zb.right - 1) { this.ride = g; break; }
+        }
+        if (this.ride) break;
+      }
+    }
     if (this.grounded && !this.wasGrounded && this.levelTick > 2) {
       const impact = Math.abs(this.lastVy);
       this.hero.land(impact);
@@ -998,24 +1178,52 @@ export class GameScene extends Phaser.Scene {
       if (p.group && !p.group.visible) continue;
       const ox = p.group ? p.group.ox : 0, oy = p.group ? p.group.oy : 0;
       const r = { x: p.tx * TILE + 4 + ox, y: p.ty * TILE + 14 + oy, w: 32, h: 26 };
+      if (p.squashT > 0) p.squashT--;
       if (overlap(big, r) && this.pbody.velocity.y * this.gdir >= 0) {
-        this.pbody.setVelocityY(-PHYS.padVel * this.gdir);
+        const def = p.group?.def;
+        if (def?.dud) {
+          // a dud: squeaks, does nothing
+          if (p.squashT === 0) {
+            this.troll(def.troll);
+            p.img.setTexture('pad-dud-squash');
+            this.time.delayedCall(140, () => p.img.active && p.img.setTexture('pad-dud'));
+            this.say('...boing?', 'hero', 40);
+            this.sfx('click');
+          }
+          p.squashT = 20;
+          continue;
+        }
+        const lv = def?.launch ?? [0, -PHYS.padVel];
+        this.pbody.setVelocity(lv[0] !== 0 ? lv[0] : this.pbody.velocity.x, lv[1] * this.gdir);
+        if (lv[0] !== 0) this.launchLock = 30;
         this.jumping = false;
         this.grounded = false;
         this.coyote = 0;
         this.hero.launch();
-        this.troll(p.group?.def.troll);
-        p.img.setTexture('pad-squash');
-        this.time.delayedCall(140, () => p.img.active && p.img.setTexture('pad'));
+        this.troll(def?.troll);
+        p.img.setTexture(`${p.tex}-squash`);
+        this.time.delayedCall(140, () => p.img.active && p.img.setTexture(p.tex));
         this.sfx('pad');
+      }
+    }
+    // spiked balls
+    for (const bl of this.balls) {
+      if (bl.group && !bl.group.visible) continue;
+      const cx = bl.tx * TILE + TILE / 2 + (bl.group ? bl.group.ox : 0), cy = bl.ty * TILE + TILE / 2 + (bl.group ? bl.group.oy : 0);
+      if (overlap(pr, { x: cx - 15, y: cy - 15, w: 30, h: 30 })) {
+        this.troll(bl.group?.def.troll);
+        this.kill('ball');
+        return;
       }
     }
     // fake doors bite
     for (const f of this.fakeDoors) {
-      const r = { x: f.x - 14, y: f.flipped ? f.y : f.y - 64, w: 28, h: 64 };
+      if (f.group && !f.group.visible) continue;
+      const fx = f.x + (f.group ? f.group.ox : 0), fy = f.y + (f.group ? f.group.oy : 0);
+      const r = { x: fx - 14, y: f.flipped ? fy : fy - 64, w: 28, h: 64 };
       if (overlap(pr, r)) {
         f.door.chomp();
-        this.troll(this.lvl.fakeExits?.[String(Math.round((f.x - TILE / 2) / TILE))] ?? this.lvl.fakeExitTroll);
+        this.troll(f.group?.def.troll ?? this.lvl.fakeExits?.[String(Math.round((f.x - TILE / 2) / TILE))] ?? this.lvl.fakeExitTroll);
         this.say('NOPE!', [f.x / TILE - 0.5, f.y / TILE - 3.2], 50);
         this.sfx('chomp');
         this.kill('fakedoor');
@@ -1047,11 +1255,37 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private hintVisible(x: number, after: number): boolean {
-    if (after <= 0) return true;
-    let n = 0;
-    for (const d of this.deathXs) if (Math.abs(d - x) < 10 * TILE) n++;
-    return n >= after;
+  /** Spend the level's one hint: describe (and highlight) the next trap ahead of the hero. */
+  useHint(): void {
+    if (this.hintUsed || this.state === 'won') return;
+    this.hintUsed = true;
+    this.hintBtn.enabled = false;
+    this.hintBtn.setAlpha(0.35);
+    const hx = this.pbody.center.x / TILE;
+    const next = (this.lvl.trolls ?? []).filter((t) => t.x + t.w > hx - 0.5).sort((a, b) => a.x - b.x)[0];
+    const text = next ? next.hint : 'Nothing left to fear... probably.';
+    this.hintShown = { id: next ? next.id : '', text };
+    this.hintBox?.destroy();
+    const c = this.add.container(WORLD_W / 2, 150).setDepth(150);
+    const t = label(this, 0, 0, text, 24, '#2b2d42', 0);
+    const w = Math.min(1100, t.width + 70);
+    const g = this.add.graphics();
+    g.fillStyle(0xfff6d5, 0.96).fillRoundedRect(-w / 2, -30, w, 60, 22);
+    g.lineStyle(5, 0x2b2d42, 1).strokeRoundedRect(-w / 2, -30, w, 60, 22);
+    const bulb = this.add.image(-w / 2 + 28, 0, 'icon-bulb').setScale(0.9 / RES).setTint(0xf2b705);
+    t.setX(14);
+    c.add([g, bulb, t]);
+    this.uiLayer.add(c);
+    this.hintBox = c;
+    c.setScale(0.3);
+    this.tweens.add({ targets: c, scale: 1, duration: 180, ease: 'Back.Out' });
+    this.tweens.add({ targets: c, alpha: 0, delay: 4200, duration: 400, onComplete: () => { c.destroy(); if (this.hintBox === c) this.hintBox = null; } });
+    if (next) {
+      const hl = this.track(this.add.rectangle(next.x * TILE, 0, next.w * TILE, WORLD_H, 0xffd23f, 0.22).setOrigin(0).setDepth(20));
+      hl.setStrokeStyle(6, 0xffd23f, 0.9);
+      this.tweens.add({ targets: hl, alpha: 0.25, duration: 300, yoyo: true, repeat: 4, onComplete: () => hl.setVisible(false) });
+    }
+    this.sfx('coin');
   }
 
   private troll(id: string | undefined): void {
@@ -1163,9 +1397,26 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.flash(120, 255, 255, 255, false);
         trap = true;
       } else if ('controls' in a) {
+        this.ctrlMode = a.controls;
         this.ctrlFlip = a.controls === 'flip';
-        this.flipText.setVisible(this.ctrlFlip);
-        if (this.ctrlFlip) { this.say('huh?!', 'hero', 50); this.sfx('flip'); trap = true; }
+        if (a.controls !== 'normal') {
+          this.say(a.controls === 'flip' ? 'huh?!' : a.controls === 'nojump' ? '...?' : 'whoa!', 'hero', 50);
+          this.sfx('flip');
+          trap = true;
+        }
+      } else if ('gravityScale' in a) {
+        this.gScale = a.gravityScale;
+        if (a.gravityScale !== 1) {
+          this.say(a.gravityScale < 1 ? 'floaty...' : 'so heavy...', 'hero', 50);
+          this.sfx('flip');
+          trap = true;
+        }
+      } else if ('camera' in a) {
+        this.cameraTrick(a.camera);
+        if (a.camera === 'freeze' || a.camera === 'flip' || a.camera === 'zoom') trap = true;
+      } else if ('fakeClear' in a) {
+        this.showFakeClear(a.fakeClear);
+        if (a.fakeClear) trap = true;
       } else if ('say' in a) {
         this.say(a.say, a.at, a.ticks ?? 70);
       } else if ('shake' in a) {
@@ -1204,6 +1455,9 @@ export class GameScene extends Phaser.Scene {
 
   private updateGroups(): void {
     for (const g of this.groups.values()) {
+      const ox0 = g.ox, oy0 = g.oy;
+      g.dx = 0;
+      g.dy = 0;
       if (g.state === 'gone') continue;
       if (g.deadlyEnd) { g.deadlyEnd = false; g.deadlyMove = false; }
       if (g.state === 'shaking') {
@@ -1237,8 +1491,11 @@ export class GameScene extends Phaser.Scene {
       if (g.chase) {
         g.ox += g.chase.vx;
         g.oy += g.chase.vy;
-        if (g.chase.untilX !== undefined && g.ox >= g.chase.untilX * TILE) { g.ox = g.chase.untilX * TILE; g.chase = null; }
+        if (g.chase && g.chase.untilX !== undefined && g.ox >= g.chase.untilX * TILE) { g.ox = g.chase.untilX * TILE; g.chase = null; }
+        if (g.chase && g.chase.untilY !== undefined && Math.abs(g.oy) >= Math.abs(g.chase.untilY * TILE)) { g.oy = g.chase.untilY * TILE; g.chase = null; }
       }
+      g.dx = g.ox - ox0;
+      g.dy = g.oy - oy0;
       // sync bodies
       for (const z of g.bodies) {
         const base = z.getData('base') as { x: number; y: number };
@@ -1452,6 +1709,7 @@ export class GameScene extends Phaser.Scene {
       this.door.animate(dt, this.doorVx);
     }
     for (const f of this.fakeDoors) f.door.animate(dt, 0);
+    for (const bl of this.balls) if (bl.group) bl.img.setRotation(bl.group.ox / 20);
     for (const bb of this.bubbles) {
       if (bb.follow === 'door') bb.c.setPosition(this.doorPos.x, this.doorPos.y - (this.door?.flipped ? -150 : 108));
       if (bb.follow === 'hero') bb.c.setPosition(b.center.x, b.y - 26);
@@ -1459,9 +1717,16 @@ export class GameScene extends Phaser.Scene {
     const keep = this.bubbles.filter((x) => x.until > this.levelTick);
     for (const x of this.bubbles) if (x.until <= this.levelTick) x.c.destroy();
     this.bubbles = keep;
-    for (const h of this.hints) h.obj.setVisible(this.hintVisible(h.obj.x, h.after));
+    if (this.tutorialMaxX && this.pbody.center.x > this.tutorialMaxX) {
+      Save.setTutorialSeen();
+      this.tutorialMaxX = 0;
+      for (const h of this.hints) this.tweens.add({ targets: h.obj, alpha: 0, duration: 400 });
+    }
     // camera: smooth follow with a little look-ahead in the running direction
-    if (this.state === 'play') {
+    const cam = this.cameras.main;
+    const wantZoom = this.baseZoom * this.camZoomMul;
+    if (Math.abs(cam.zoom - wantZoom) > 0.001) cam.setZoom(cam.zoom + (wantZoom - cam.zoom) * Math.min(1, dt * 6));
+    if (this.state === 'play' && !this.camFrozen) {
       const look = Phaser.Math.Clamp(b.velocity.x * 0.35, -110, 110);
       const k = 1 - Math.pow(0.004, Math.min(dt, 0.05));
       this.camX += (b.center.x + look - this.camX) * k;
@@ -1478,6 +1743,11 @@ export class GameScene extends Phaser.Scene {
     this.snapCamera();
   }
 
+  /** Test hook: press the hint button. */
+  debugHint(): void {
+    this.useHint();
+  }
+
   /** Test hook: kill the hero right now (used to check checkpoint respawns). */
   debugKill(): void {
     this.kill('test');
@@ -1491,7 +1761,9 @@ export class GameScene extends Phaser.Scene {
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
       trolls: [...this.trollsFired], checkpoint: this.cpActive, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
-      hudDeaths: this.deathText.text, cpX: this.cp ? this.cp.x : -1, zoom: this.cameras.main.zoom,
+      hudDeaths: this.deathText.text, ctrlMode: this.ctrlMode, gScale: this.gScale, camFrozen: this.camFrozen, camFlip: this.camFlip,
+      camZoom: this.camZoomMul, hintUsed: this.hintUsed, hint: this.hintShown ? this.hintShown.text : '',
+      g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])), cpX: this.cp ? this.cp.x : -1, zoom: this.cameras.main.zoom,
       viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE,
     };
   }
