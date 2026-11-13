@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeLevel } from './softlock.mjs';
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'levels');
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
@@ -78,7 +79,12 @@ files.forEach((f, idx) => {
   if ((L.hints || []).length && L.id !== 1) fail(f, 'text hints are only allowed in level 1 (control instructions)');
   if ((L.hints || []).some((h) => 'afterDeaths' in h)) fail(f, 'hints after deaths are not allowed');
   levels.push({ f, L, W });
-  console.log(`✓ ${f}  "${L.name}"  ${W} tiles, ${trolls.length} trolls`);
+  // no soft-locks: from every reachable place the hero can reach the EXIT or die
+  const sl = analyzeLevel(L);
+  const spots = [...new Set(sl.stuck.map((p) => `col ${p.x} row ${p.y}`))];
+  if (spots.length) fail(f, `soft-lock (no way out, no way to die) at ${spots.join('; ')} [world states: ${[...new Set(sl.stuck.map((p) => p.state))].join(', ')}]`);
+  if (sl.maxX < W - 2) fail(f, `soft-lock analysis only covered columns up to ${sl.maxX} of ${W}`);
+  console.log(`✓ ${f}  "${L.name}"  ${W} tiles, ${trolls.length} trolls, no soft-locks (${sl.states} world states, ${sl.reached} reachable spots checked)`);
 });
 // distinct palettes / main ideas
 const worlds = levels.map((x) => x.L.world);
