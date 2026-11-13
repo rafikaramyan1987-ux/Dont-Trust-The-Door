@@ -20,7 +20,9 @@ const SPIKE_ROT: Record<Dir, number> = { up: 0, down: Math.PI, left: -Math.PI / 
 /** Input-lag trap: keys arrive this many ticks late. */
 const LAG_TICKS = 18;
 /** Hiccup trap: an involuntary hop every N ticks while on the ground. */
-const HICCUP_TICKS = 48;
+const HICCUP_TICKS = 60;
+/** Hiccup hop strength (fraction of a full jump; it cannot be cut short). */
+const HICCUP_VEL = 0.62;
 /** Super-jump trap: jump strength multiplier. */
 const SUPERJUMP = 1.5;
 /** Shadow clone / homing / frog / storm hit radius (px). */
@@ -78,6 +80,7 @@ interface GroupRT {
   frogAir: boolean;
   turretT: number;
   revealed: boolean;
+  padCount: number;
   /** Pixel centre of the group's tiles as drawn in the map. */
   cx: number;
   cy: number;
@@ -87,7 +90,7 @@ interface GroupRT {
 
 interface Shot { x: number; y: number; vx: number; left: number; img: Phaser.GameObjects.Image }
 
-interface TriggerRT { def: TriggerDef; fired: boolean }
+interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean }
 
 export interface Snapshot {
   level: number;
@@ -827,6 +830,8 @@ export class GameScene extends Phaser.Scene {
       if (!def) throw new Error(`Level ${L.id}: group '${id}' used in map but not defined`);
       this.makeGroup(id, def, tiles, isSolidAll);
     }
+    // groups drawn only through `cover` tiles (e.g. on top of another group's tile)
+    for (const [id, def] of Object.entries(gdefs)) if (!groupTiles.has(id) && def.cover?.length) this.makeGroup(id, def, [], isSolidAll);
 
     // Plain spikes / pads / coins
     for (const s of spikeTiles) this.addSpike(s.tx, s.ty, SPIKE_DIR[s.ch], null);
@@ -850,6 +855,15 @@ export class GameScene extends Phaser.Scene {
     this.doorPath = [];
     this.doorWait = 0;
     this.doorVx = 0;
+
+    // Decorations: anti-gravity bubbles
+    for (const d of L.decor ?? []) {
+      const g = this.track(this.add.graphics().setDepth(4.8));
+      g.fillStyle(0x9ef0ff, 0.22).fillRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
+      g.lineStyle(4, 0xe6fdff, 0.7).strokeRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
+      for (let i = 0; i < d.w * 2; i++) g.fillStyle(0xffffff, 0.5).fillCircle(d.x * TILE + 20 + i * 20, d.y * TILE + 30 + ((i * 53) % (d.h * TILE - 60)), 4 + (i % 3) * 2);
+      this.tweens.add({ targets: g, alpha: 0.7, duration: 900, yoyo: true, repeat: -1 });
+    }
 
     // Checkpoints (one after every three traps)
     this.cps = cpAt.sort((a, b) => a.tx - b.tx).map((c) => ({ x: c.tx * TILE + TILE / 2, y: (c.ty + 1) * TILE, tx: c.tx }));
@@ -965,7 +979,7 @@ export class GameScene extends Phaser.Scene {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
-      toss: null, eatX: null, eatSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible,
+      toss: null, eatX: null, eatSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
       cx: 0, cy: 0, img: null, minTx: 0,
     };
     g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
@@ -988,6 +1002,7 @@ export class GameScene extends Phaser.Scene {
       g.img = img;
       container.setDepth(def.fake ? 6 : 0.5);
       if (def.ice) img.setTint(0xbfe9ff);
+      if (def.tint) img.setTint(def.tint);
       if (def.invisible) img.setAlpha(0);
       if (def.conveyor) this.addConveyorArrows(container, tiles, def.conveyor);
       if (def.turret) container.add(this.add.image(minX * TILE + 4, (minY + maxY + 1) / 2 * TILE, 'turret-mouth').setScale(1 / RES));
@@ -1169,7 +1184,8 @@ export class GameScene extends Phaser.Scene {
     if (mode === 'autorun') dir = 1;
     if (mode === 'nojump') jumpPressed = false;
     const gr = this.grounded;
-    if (mode === 'hiccup' && gr && this.levelTick % HICCUP_TICKS === 0) jumpPressed = true; // hic!
+    const hic = mode === 'hiccup' && gr && this.levelTick % HICCUP_TICKS === 0; // hic!
+    if (hic) jumpPressed = true;
     if (mode === 'flipjump') {
       // the jump key flips gravity instead of jumping
       if (jumpPressed && gr) this.runActions([{ gravity: 'flip' }], true);
@@ -1196,7 +1212,7 @@ export class GameScene extends Phaser.Scene {
     if (jumpPressed) this.buffer = PHYS.bufferTicks;
     if (gr) this.coyote = PHYS.coyoteTicks;
     if (this.buffer > 0 && this.coyote > 0) {
-      vy = -PHYS.jumpVel * (mode === 'superjump' ? SUPERJUMP : 1) * g;
+      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * g;
       this.jumpedNow = true;
       this.jumping = true;
       this.coyote = 0;
@@ -1204,6 +1220,7 @@ export class GameScene extends Phaser.Scene {
       this.hero.jump();
       this.dust(4);
       this.sfx('jump');
+      if (hic) { this.jumping = false; this.buffer = 0; } // a hiccup hop has a fixed height
     }
     if (this.buffer > 0) this.buffer--;
     if (!gr && this.coyote > 0) this.coyote--;
@@ -1329,7 +1346,8 @@ export class GameScene extends Phaser.Scene {
           p.squashT = 20;
           continue;
         }
-        const lv = def?.launch ?? [0, -PHYS.padVel];
+        let lv = def?.launch ?? [0, -PHYS.padVel];
+        if (def?.stack && p.group) { lv = [0, -def.stack[Math.min(p.group.padCount, def.stack.length - 1)]]; p.group.padCount++; }
         this.pbody.setVelocity(lv[0] !== 0 ? lv[0] : this.pbody.velocity.x, lv[1] * this.gdir);
         this.launchLock = def?.lock ?? (lv[0] !== 0 ? 30 : 0);
         this.jumping = false;
@@ -1494,6 +1512,14 @@ export class GameScene extends Phaser.Scene {
   private checkTriggers(): void {
     const pr = this.playerRect(0);
     for (const t of this.triggers) {
+      if (t.def.hold && t.def.when.zone) {
+        // zone effects: on while inside, undone on leaving
+        const [x, y, ww, hh] = t.def.when.zone;
+        const inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+        if (inside && !t.inside) { t.inside = true; this.troll(t.def.troll); this.runActions(t.def.do, t.fired); t.fired = true; }
+        else if (!inside && t.inside) { t.inside = false; this.runActions(t.def.undo ?? [], true); }
+        continue;
+      }
       if (t.fired) continue;
       const w = t.def.when;
       let ok = false;

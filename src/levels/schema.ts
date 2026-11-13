@@ -51,6 +51,8 @@ export interface GroupDef {
   dud?: boolean;
   /** Jump pads: ticks without air control after the launch (default 30 for sideways pads). */
   lock?: number;
+  /** Jump pads: launch speeds (px/s, upward) for the 1st, 2nd, 3rd… bounce of the group. */
+  stack?: number[];
   /** Jump pads: only launch when you land on them faster than this (px/s) – "rubber floor". */
   minFall?: number;
   /** Blocks: a conveyor belt that carries whoever stands on it (px/s, + = right). */
@@ -75,6 +77,8 @@ export interface GroupDef {
   frog?: { speed: number; jump: number };
   /** Blocks: a turret that fires spiked balls every N ticks at vx px/tick once activated. */
   turret?: { every: number; vx: number; range: number };
+  /** Blocks: colour tint marking special floor (e.g. a strip where the controls change). */
+  tint?: number;
   /** Blocks: one physics body per column (needed for `eat`). */
   columns?: boolean;
 }
@@ -148,6 +152,9 @@ export interface TriggerDef {
   every?: number;
   /** Repeats stop once the hero is past this tile x. */
   stopAt?: number;
+  /** Zone effect: `do` runs whenever the hero enters the zone, `undo` when he leaves it. */
+  hold?: boolean;
+  undo?: Action[];
   /**
    * Keep the result after a checkpoint respawn: if this trigger's zone lies before the
    * checkpoint, its final state (door moved, floor gone …) is applied instantly when the
@@ -201,6 +208,8 @@ export interface LevelData {
   triggers?: TriggerDef[];
   /** Every troll moment in the level (each must be referenced by a trigger/group/fake exit). */
   trolls?: TrollDef[];
+  /** Decorations that show where a zone effect is (tile rects). */
+  decor?: { x: number; y: number; w: number; h: number; kind: 'bubble' }[];
   /** Troll id credited when a fake EXIT (F) bites. */
   fakeExitTroll?: string;
   /** Per fake EXIT: tile x of the F → troll id (overrides fakeExitTroll). */

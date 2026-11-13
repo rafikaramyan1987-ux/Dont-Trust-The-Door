@@ -39,7 +39,9 @@ class Builder {
     this.lastF = null;
     this.hasDoor = false;
     this.text = {};
+    this.decors = [];
   }
+  decor(x, y, w, h, kind) { this.decors.push({ x: this.x0 + x, y, w, h, kind }); }
   at(label) { return this.labels[label] ?? 0; }
   label(name) { this.newLabels[name] = this.x0; }
   px(t) { return (this.x0 + t) * 40; }
@@ -47,6 +49,7 @@ class Builder {
     if (y < 0 || y >= ROWS) return;
     const row = this.grid[y];
     while (row.length <= x) row.push('.');
+    if (row[x] !== ch && IDS.includes(row[x]) && this.groups[row[x]]) throw new Error(`level ${this.id}: tile ${x},${y} of group '${row[x]}' overwritten by '${ch}' (use cover)`);
     row[x] = ch;
     this.cols = Math.max(this.cols, x + 1);
     if (ch === 'F') this.lastF = x;
@@ -101,7 +104,7 @@ function layout(spec, fillers) {
   const items = [[start, { tutorial: spec.id === 1, style }]];
   spec.traps.forEach((tr, i) => {
     const f = fillers[i];
-    if (f) items.push([connector, { w: f, seed: spec.id * 100 + i, style }]);
+    if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i, style }]);
     items.push(Array.isArray(tr) ? tr : [tr, {}]);
     if ((i + 1) % 3 === 0 && i + 1 < spec.traps.length) items.push([checkpoint, { style }]);
   });
@@ -192,6 +195,7 @@ function compile(spec, fillers) {
     id: spec.id, name: `${P}.name`, world: spec.id - 1, idea: spec.idea, winMessage: `${P}.win`,
     deathQuips: spec.deathQuips.map((_, i) => `${P}.quip${i + 1}`), hints: b.hints, map, groups: b.groups, triggers: b.triggers,
     trolls: b.trolls, fakeExits: Object.keys(b.fakeExits).length ? b.fakeExits : undefined,
+    decor: b.decors.length ? b.decors : undefined,
   };
   // danger rects, bounding box and the solution of every trap
   for (const t of level.trolls) {
@@ -248,9 +252,10 @@ for (const spec of specs.sort((a, b) => a.id - b.id)) {
   const deficit = Math.max(0, spec.minWidth - base);
   const fillers = new Array(slots).fill(0);
   if (deficit > 0) {
-    const per = Math.max(8, Math.ceil(deficit / slots));
+    const open = [...Array(slots).keys()].filter((i) => !(Array.isArray(spec.traps[i]) && spec.traps[i][1]?.noFiller));
+    const per = Math.max(8, Math.ceil(deficit / open.length));
     let left = deficit;
-    for (let i = 0; i < slots && left > 0; i++) { const w = Math.max(8, Math.min(per + ((i * 3) % 4), left < 8 ? 8 : left)); fillers[i] = w; left -= w; }
+    for (const i of open) { if (left <= 0) break; const w = Math.max(8, Math.min(per + ((i * 3) % 4), left < 8 ? 8 : left)); fillers[i] = w; left -= w; }
   }
   const { level, plans, width, text } = compile(spec, fillers);
   for (const k of Object.keys(en)) if (k.startsWith(`L${spec.id}.`)) delete en[k];
