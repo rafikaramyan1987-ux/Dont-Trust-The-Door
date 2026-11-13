@@ -1,6 +1,7 @@
 // Captures marketing media from the real game (production build, deterministic replays):
 //   docs/media/screens/*.png   title, hero expressions, funniest moment of every level
-//   docs/media/trailer-9x16.mp4  20 s vertical gameplay video with soundtrack
+//   docs/media/trailer-9x16.mp4  20 s vertical video (clip list below is tied to the first,
+//                                single-screen slice; run with --video-only to re-record)
 // Usage: npm run build && node tools/capture-media.mjs [--screens-only|--video-only]
 // Requires ffmpeg on PATH and Python 3 with Pillow (for compositing the vertical video).
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
@@ -16,42 +17,52 @@ rmSync(TMP, { recursive: true, force: true });
 mkdirSync(join(TMP, 'frames'), { recursive: true });
 const args = new Set(process.argv.slice(2));
 const R = (l) => JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-${String(l).padStart(2, '0')}.json`), 'utf8'));
-const pick = (l, which) => (which === 'win' ? R(l).win : R(l).traps[which] ?? Object.values(R(l).traps)[which]);
+const pick = (l, which) => (which === 'win' ? R(l).win : (R(l).traps[which] ?? Object.values(R(l).traps)[which]).rec);
 
 const { server, url } = await serveDist();
 const browser = await launch();
 
 /**
- * Advance the current level (already started with a replay) until `until` holds, then
- * `extra` more rendered frames. The simulation is deterministic, so we first find the
- * target tick with the fast non-rendering sim, then restart and only render the last
- * `warm` ticks (enough for tweens, particles and slow-motion to look right).
+ * Advance a level driven by a replay until `until` holds, then `extra` more rendered
+ * frames. The simulation is deterministic, so we first find the target tick with the fast
+ * non-rendering sim, then restart and only render the last `warm` ticks.
+ * `until` may be a JS expression over the state `s`, or "troll:<name prefix>" (that troll
+ * moment has fired).
  */
-async function advance(page, lvl, rec, until, extra = 0, warm = 30) {
-  return page.evaluate(({ lvl, rec, until, extra, warm }) => {
+async function advance(page, lvl, rec, until, extra = 0, warm = 30, checkpoint = false) {
+  let cond = until;
+  if (until.startsWith('troll:')) {
+    const L = JSON.parse(readFileSync(join(ROOT, 'src', 'levels', readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort()[lvl - 1]), 'utf8'));
+    const t = L.trolls.find((x) => x.name.startsWith(until.slice(6)));
+    if (!t) throw new Error(`level ${lvl}: no troll "${until}"`);
+    cond = `s.trolls.includes('${t.id}')`;
+  }
+  return page.evaluate(({ lvl, rec, cond, extra, warm, checkpoint }) => {
     const T = window.__DTTD;
-    const f = new Function('s', `return (${until});`);
+    const f = new Function('s', `return (${cond});`);
     const sc = () => T.game.scene.getScene('Game');
-    T.start(lvl, rec);
+    T.start(lvl, rec, checkpoint);
     let n = 0;
-    while (!f(T.state()) && n++ < 3000) sc().fixedTick();
+    while (!f(T.state()) && n++ < 9000) sc().fixedTick();
     const target = T.state().tick;
-    T.start(lvl, rec);
+    T.start(lvl, rec, checkpoint);
     T.step(12); // render the spawn pop-in
     while (T.state().tick < target - warm) sc().fixedTick();
+    T.snapCamera();
     n = 0;
     while (!f(T.state()) && n++ < 600) T.step(1);
     T.step(extra);
     return T.state();
-  }, { lvl, rec, until, extra, warm });
+  }, { lvl, rec, cond, extra, warm, checkpoint });
 }
 
 // ---------------------------------------------------------------------------
-// Screenshots
+// Screenshots (phone-sized landscape, 844×390 @2x, with the touch controls)
+const PHONE = { viewport: { width: 844, height: 390 }, context: { deviceScaleFactor: 2, hasTouch: true, isMobile: true } };
 if (!args.has('--video-only')) {
-  const { page, errors, ctx } = await openGame(browser, url, { context: { deviceScaleFactor: 2 } });
+  for (const f of readdirSync(SHOTS)) rmSync(join(SHOTS, f));
+  const { page, errors, ctx } = await openGame(browser, url, PHONE);
   await page.evaluate(() => window.__DTTD.resetSave());
-  // title (real time so the logo bounces and the door winks)
   await page.evaluate(() => window.__DTTD.scene('Title'));
   await page.waitForTimeout(2350);
   await page.screenshot({ path: join(SHOTS, '00-title.png') });
@@ -61,32 +72,50 @@ if (!args.has('--video-only')) {
   await page.evaluate(() => window.__DTTD.scene('Select'));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(SHOTS, '00-level-select.png') });
-
-  const moments = [
-    [1, 'win', 's.y>=622 && s.grounded', 12, 'the last block sinks — "oops!"'],
-    [2, 0, 's.y>=625', 0, 'the floor lied'],
-    [3, 'win', 's.doorX>=1110', 0, 'the EXIT grows legs and runs'],
-    [4, 0, 's.state==="dead"', 3, 'spikes pop exactly where you land'],
-    [5, 0, 's.state==="dead"', 2, 'the heavy ceiling'],
-    [6, 0, 's.y<=330', 0, 'boing… straight into the spikes'],
-    [7, 0, 's.state==="dead"', 5, 'the fake EXIT bites'],
-    [8, 0, 's.gravity<0', 45, 'gravity flips mid-jump'],
-    [9, 0, 's.state==="dead"', 3, 'that coin had teeth'],
-    [10, 'win', 's.doorX>=1080', 0, 'everything chases you'],
-  ];
   if (errors.length) console.log('console errors:', errors);
   await ctx.close();
-  // level moments at the game's native 1280×720
-  const lv = await openGame(browser, url);
+
+  // [level, replay ('win' or trap name prefix), until, extra frames, caption]
+  const moments = [
+    [1, 'win', 'troll:The EXIT grows legs', 34, 'the EXIT grows legs and runs off over the level'],
+    [2, 'The bridge crumbles', 'troll:The bridge crumbles', 30, 'the bridge crumbles under you'],
+    [3, 'A fake EXIT that bites (2)', 's.state==="dead"', 5, 'a fake EXIT bites'],
+    [4, 'Hidden spikes behind the fake ones', 's.state==="dead"', 2, 'the fake spikes were harmless – the landing spot was not'],
+    [5, 'The ceiling falls (safe spot: under the bolted spikes)', 's.state==="dead"', 2, 'the heavy ceiling'],
+    [6, 'The jump pad launches you into ceiling spikes', 'troll:The jump pad launches', 16, 'boing… straight at the spikes'],
+    [7, 'win', 'troll:The real EXIT hides inside the wall', 3, 'the real EXIT hides inside the wall'],
+    [8, 'Left and right swap', 'troll:Left and right swap', 22, 'left and right swap'],
+    [9, 'The coin arc over the pit bites', 's.state==="dead"', 3, 'that coin had teeth'],
+    [10, 'A spike wall chases you', 'troll:A spike wall chases you', 40, 'the spike wall chases you'],
+  ];
+  const lv = await openGame(browser, url, PHONE);
   await lv.page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.setManual(true); });
   for (const [lvl, which, until, extra, caption] of moments) {
-    await advance(lv.page, lvl, pick(lvl, which), until, extra, 16);
+    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-${String(lvl).padStart(2, '0')}.json`), 'utf8'));
+    const t = which === 'win' ? { rec: R.win, cp: false } : R.traps[Object.keys(R.traps).find((k) => k.startsWith(which))];
+    await advance(lv.page, lvl, t.rec, until, extra, 16, t.cp);
     const file = `level-${String(lvl).padStart(2, '0')}.png`;
     await lv.page.screenshot({ path: join(SHOTS, file), timeout: 180000 });
     console.log(`screens/${file}  ${caption}`);
   }
+  // the checkpoint flag
+  {
+    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', 'level-05.json'), 'utf8'));
+    await advance(lv.page, 5, R.win, 's.checkpoint', 20, 16);
+    await lv.page.screenshot({ path: join(SHOTS, 'checkpoint.png'), timeout: 180000 });
+    console.log('screens/checkpoint.png  the checkpoint flag');
+  }
   if (lv.errors.length) console.log('console errors:', lv.errors);
   await lv.ctx.close();
+  // desktop layout for comparison
+  const dk = await openGame(browser, url, { context: { deviceScaleFactor: 1 } });
+  await dk.page.evaluate(() => window.__DTTD.setManual(true));
+  {
+    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', 'level-10.json'), 'utf8'));
+    await advance(dk.page, 10, R.cp, 's.gravity<0', 30, 16, true);
+    await dk.page.screenshot({ path: join(SHOTS, 'desktop-1280x720.png'), timeout: 180000 });
+  }
+  await dk.ctx.close();
 }
 
 // ---------------------------------------------------------------------------

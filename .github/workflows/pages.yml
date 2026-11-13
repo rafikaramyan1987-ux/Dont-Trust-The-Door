@@ -4,7 +4,7 @@ name: Build & deploy to GitHub Pages
 # at https://<owner>.github.io/<repo>/ (Settings → Pages → "Deploy from a branch: gh-pages").
 on:
   push:
-    branches: [main, ccr-3b28b31d-yxxpc3]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

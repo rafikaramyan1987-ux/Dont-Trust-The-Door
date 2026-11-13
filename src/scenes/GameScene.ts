@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { TILE, COLS, ROWS, WORLD_W, WORLD_H, PHYS, DT, TICK_MS, RESTART_TICKS, PALETTES, Palette } from '../config';
+import { TILE, ROWS, WORLD_W, WORLD_H, PHYS, DT, TICK_MS, RESTART_TICKS, PALETTES, Palette } from '../config';
 import { LEVELS } from '../levels';
 import type { LevelData, GroupDef, TriggerDef, Action, TileChar } from '../levels/schema';
-import { drawTerrain, addTerrainTexture, RES } from '../art';
+import { drawTerrain, addTerrainTexture, makeTerrainTileset, maskAt, RES, TILESET_PAD } from '../art';
 import { Hero } from '../game/Hero';
 import { Door } from '../game/Door';
 import { Input, Keys } from '../input';
@@ -52,6 +52,8 @@ interface GroupRT {
   move: MoveState | null;
   chase: { vx: number; vy: number; untilX?: number } | null;
   deadlyMove: boolean;
+  /** A deadly move just finished: still deadly for this one tick (the landing frame). */
+  deadlyEnd: boolean;
 }
 
 interface TriggerRT { def: TriggerDef; fired: boolean }
@@ -69,6 +71,14 @@ export interface Snapshot {
   fired: string[];
   doorX: number; doorY: number;
   lastDeath: string;
+  trolls: string[];
+  checkpoint: boolean;
+  worldW: number;
+  controlsFlipped: boolean;
+  hudDeaths: string;
+  cpX: number;
+  zoom: number;
+  viewTiles: number;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -119,15 +129,35 @@ export class GameScene extends Phaser.Scene {
   private pads: Pad[] = [];
   private groups = new Map<string, GroupRT>();
   private triggers: TriggerRT[] = [];
-  private scheduled: { at: number; actions: Action[] }[] = [];
+  private scheduled: { at: number; actions: Action[]; every?: number; repeat?: boolean }[] = [];
+  /** World x of every death in this level (hints appear near where you keep dying). */
+  private deathXs: number[] = [];
   private fired = new Set<string>();
   private hints: { obj: Phaser.GameObjects.Text; after: number }[] = [];
   private staticSolid = new Set<number>();
   private fakeWalls: GroupRT[] = [];
+  /** Level width in tiles / pixels (levels scroll horizontally). */
+  cols = 32;
+  worldW = WORLD_W;
+  private cp: { x: number; y: number; tx: number } | null = null;
+  /** Checkpoint reached in this attempt series: deaths respawn there. */
+  cpActive = false;
+  private cpFlag: Phaser.GameObjects.Image | null = null;
+  /** Troll ids that have fired at least once since the level was entered. */
+  trollsFired = new Set<string>();
+  private ctrlFlip = false;
+  private camX = 0;
+  private camY = 0;
+  private uiCam!: Phaser.Cameras.Scene2D.Camera;
+  private worldLayer!: Phaser.GameObjects.Layer;
+  private uiLayer!: Phaser.GameObjects.Layer;
+  private flipText!: Phaser.GameObjects.Text;
 
   // presentation
   private bg!: Phaser.GameObjects.Image;
   private dots!: Phaser.GameObjects.TileSprite;
+  private hills!: Phaser.GameObjects.TileSprite;
+  private clouds!: Phaser.GameObjects.TileSprite;
   private hud!: Phaser.GameObjects.Container;
   private deathText!: Phaser.GameObjects.Text;
   private deathIcon!: Phaser.GameObjects.Image;
@@ -150,8 +180,12 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data: { level?: number; replay?: Keys[] }): void {
+  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean }): void {
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
+    this.cpActive = !!data.checkpoint;
+    this.deathXs = [];
+    this.trollsFired = new Set();
+    this.ctrlFlip = false;
     this.deathsLevel = 0;
     this.replay = data.replay ?? null;
     this.paused = false;
@@ -182,12 +216,26 @@ export class GameScene extends Phaser.Scene {
     this.lvl = LEVELS[this.levelNum - 1];
     this.pal = PALETTES[this.lvl.world % PALETTES.length];
     this.physics.world.isPaused = true; // we step it manually, one fixed tick at a time
-    this.physics.world.setBounds(0, -400, WORLD_W, WORLD_H + 800);
+    this.cols = Math.max(...this.lvl.map.map((r) => r.length));
+    this.worldW = this.cols * TILE;
+    this.physics.world.setBounds(0, -400, this.worldW, WORLD_H + 800);
     this.physics.world.setBoundsCollision(true, true, false, false);
 
-    this.bg = this.add.image(0, 0, `bg-${this.lvl.world % PALETTES.length}`).setOrigin(0).setDepth(-20);
-    this.dots = this.add.tileSprite(0, 0, 64, 64, `dots-${this.lvl.world % PALETTES.length}`).setOrigin(0).setDepth(-19);
+    // Two cameras: the main one shows the scrolling world, the UI camera shows the HUD,
+    // touch buttons and overlays in a fixed 1280×720 design space.
+    this.worldLayer = this.add.layer().setDepth(0);
+    this.uiLayer = this.add.layer().setDepth(100);
+    this.uiCam = this.cameras.add(0, 0, this.scale.width, this.scale.height, false, 'ui');
+    this.cameras.main.ignore(this.uiLayer);
+    this.uiCam.ignore(this.worldLayer);
+
+    this.bg = this.add.image(0, 0, `bg-${this.lvl.world % PALETTES.length}`).setScrollFactor(0).setDepth(-20);
+    this.dots = this.add.tileSprite(0, 0, 64, 64, `dots-${this.lvl.world % PALETTES.length}`).setScrollFactor(0).setDepth(-19);
     this.dots.setTileScale(1 / RES);
+    const wi = this.lvl.world % PALETTES.length;
+    this.clouds = this.add.tileSprite(0, 0, 64, 64, 'clouds').setScrollFactor(0).setDepth(-18).setTileScale(1 / RES);
+    this.hills = this.add.tileSprite(0, 0, 64, 64, `hills-${wi}`).setScrollFactor(0).setDepth(-17).setTileScale(1 / RES);
+    this.worldLayer.add([this.bg, this.dots, this.clouds, this.hills]);
 
     this.makeEmitters();
     this.buildHud();
@@ -220,11 +268,10 @@ export class GameScene extends Phaser.Scene {
   // Layout
 
   private relayout(): void {
-    this.lay = applyLayout(this);
+    this.uiCam.setSize(this.scale.width, this.scale.height);
+    this.lay = applyLayout(this, this.uiCam);
     const L = this.lay;
-    const pad = 80;
-    this.bg.setPosition(L.left - pad, L.top - pad).setDisplaySize(L.right - L.left + pad * 2, L.bottom - L.top + pad * 2);
-    this.dots.setPosition(L.left - pad, L.top - pad).setSize(L.right - L.left + pad * 2, L.bottom - L.top + pad * 2);
+    this.layoutWorldCamera();
 
     // system buttons: in the right pillar on touch layouts, top-right otherwise
     const P = L.pillar;
@@ -251,6 +298,48 @@ export class GameScene extends Phaser.Scene {
     this.fitDim();
   }
 
+  /**
+   * World camera: its viewport excludes the touch-button pillars; zoom shows ~22 tiles
+   * across on touch screens (bigger hero) and the full 18-tile height on desktop.
+   */
+  private layoutWorldCamera(): void {
+    const L = this.lay;
+    const cam = this.cameras.main;
+    const W = this.scale.width, H = this.scale.height;
+    const px = Math.round(L.pillar * L.zoom);
+    const vw = Math.max(1, W - px * 2);
+    cam.setViewport(px, 0, vw, H);
+    const tilesAcross = L.touch ? 22 : 32;
+    const zoom = Math.max(H / WORLD_H, vw / (tilesAcross * TILE));
+    cam.setZoom(zoom);
+    cam.setBounds(0, 0, this.worldW, WORLD_H);
+    const pad = 200;
+    this.bg.setPosition(vw / 2, H / 2).setDisplaySize(vw / zoom + pad, H / zoom + pad);
+    this.dots.setPosition(vw / 2, H / 2).setSize(vw / zoom + pad, H / zoom + pad);
+    // scenery: clouds across the top, hills along the bottom (parallax in applyCamera)
+    this.clouds.setOrigin(0.5, 0).setPosition(vw / 2, H / 2 - H / zoom / 2 + 10).setSize(vw / zoom + pad, 300);
+    this.hills.setOrigin(0.5, 1).setPosition(vw / 2, H / 2 + H / zoom / 2).setSize(vw / zoom + pad, 260);
+    if (this.pbody) this.snapCamera();
+  }
+
+  private snapCamera(): void {
+    this.camX = this.pbody.center.x;
+    this.camY = this.pbody.center.y - 40;
+    this.applyCamera();
+  }
+
+  private applyCamera(): void {
+    const cam = this.cameras.main;
+    const hw = cam.width / cam.zoom / 2, hh = cam.height / cam.zoom / 2;
+    this.camX = Phaser.Math.Clamp(this.camX, hw, Math.max(hw, this.worldW - hw));
+    this.camY = Phaser.Math.Clamp(this.camY, hh, Math.max(hh, WORLD_H - hh));
+    cam.centerOn(this.camX, this.camY);
+    this.dots.tilePositionX = cam.scrollX * 0.35 * RES;
+    this.dots.tilePositionY = cam.scrollY * 0.35 * RES;
+    this.clouds.tilePositionX = cam.scrollX * 0.12 * RES + this.time.now * 0.004 * RES;
+    this.hills.tilePositionX = cam.scrollX * 0.25 * RES;
+  }
+
   private fitDim(): void {
     if (!this.overlay) return;
     const d = this.overlay.getByName('dim') as Phaser.GameObjects.Rectangle | null;
@@ -266,10 +355,14 @@ export class GameScene extends Phaser.Scene {
     this.deathText = label(this, WORLD_W / 2 + 8, 34, '0', 40, '#fff6d5', 9).setOrigin(0, 0.5);
     this.quip = label(this, WORLD_W / 2, 84, '', 26, '#ffd23f', 7).setAlpha(0);
     this.levelText = label(this, 24, 30, `${this.levelNum}. ${this.lvl.name}`, 22, '#fff6d5', 6).setOrigin(0, 0.5);
-    this.hud.add([this.deathIcon, this.deathText, this.quip, this.levelText]);
+    this.flipText = label(this, WORLD_W / 2, 124, '⇄ CONTROLS FLIPPED', 22, '#ff6f91', 6).setVisible(false);
+    this.hud.add([this.deathIcon, this.deathText, this.quip, this.levelText, this.flipText]);
+    this.uiLayer.add(this.hud);
     const mk = (icon: string, fn: () => void) => {
       const b = new Button(this, 0, 0, { w: 60, h: 56, icon, color: '#5b8cff', radius: 16 }, fn);
       b.setDepth(101);
+      this.uiLayer.add(b);
+      this.cameras.main.ignore(b);
       this.sysButtons.push(b);
       return b;
     };
@@ -298,6 +391,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildTouch(): void {
     this.touchUI = this.add.container(0, 0).setDepth(90);
+    this.uiLayer.add(this.touchUI);
     const mk = (key: keyof Keys, icon: string) => {
       const c = this.add.container(0, 0);
       const g = this.add.graphics();
@@ -313,7 +407,7 @@ export class GameScene extends Phaser.Scene {
     this.input.addPointer(3);
     const handle = (p: Phaser.Input.Pointer) => {
       if (!this.lay?.touch) return;
-      const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+      const wp = this.uiCam.getWorldPoint(p.x, p.y);
       let hit: keyof Keys | null = null;
       if (p.isDown) for (const b of this.touchBtns) if (wp.x >= b.zone.x && wp.x <= b.zone.x + b.zone.w && wp.y >= b.zone.y && wp.y <= b.zone.y + b.zone.h) hit = b.key;
       this.pointers.set(p.id, hit);
@@ -401,6 +495,7 @@ export class GameScene extends Phaser.Scene {
       scale: { start: 1, end: 0.6 }, lifespan: 1100, gravityY: 800,
       tint: [0xff6f91, 0xffd23f, 0x5b8cff, 0x6fd36b, 0x41c6c0], emitting: false,
     }).setDepth(30);
+    this.worldLayer.add([this.emitDeath, this.emitDust, this.emitConfetti]);
   }
 
   // -------------------------------------------------------------------------
@@ -426,11 +521,12 @@ export class GameScene extends Phaser.Scene {
     this.fakeWalls = [];
     this.hints = [];
     this.door = null;
-
+    this.cpFlag = null;
   }
 
   private track<T extends Phaser.GameObjects.GameObject>(o: T): T {
     this.objs.push(o);
+    this.worldLayer.add(o);
     return o;
   }
 
@@ -442,9 +538,11 @@ export class GameScene extends Phaser.Scene {
     const staticTiles: { tx: number; ty: number }[] = [];
     this.staticSolid = new Set();
     const solidAll = new Set<number>();
-    const key = (x: number, y: number) => y * 100 + x;
+    const key = (x: number, y: number) => y * 1000 + x;
+    const COLS = this.cols;
     let doorAt: { tx: number; ty: number } | null = null;
     const fakeAt: { tx: number; ty: number }[] = [];
+    let cpAt: { tx: number; ty: number } | null = null as { tx: number; ty: number } | null;
     const spikeTiles: { tx: number; ty: number; ch: string }[] = [];
     const padTiles: { tx: number; ty: number }[] = [];
     const coinTiles: { tx: number; ty: number }[] = [];
@@ -460,43 +558,58 @@ export class GameScene extends Phaser.Scene {
         else if (ch === 'P') this.spawn = { x: tx * TILE + TILE / 2, y: (ty + 1) * TILE };
         else if (ch === 'D') doorAt = { tx, ty };
         else if (ch === 'F') fakeAt.push({ tx, ty });
+        else if (ch === 'C') cpAt = { tx, ty };
         else if (ch >= 'a' && ch <= 'z') {
           if (!groupTiles.has(ch)) groupTiles.set(ch, []);
           groupTiles.get(ch)!.push({ tx, ty });
           const d = gdefs[ch];
-          if (d && d.tile === '#' && !d.hidden) solidAll.add(key(ch === ch ? tx : tx, ty));
+          if (d && d.tile === '#' && !d.hidden && !d.fake) solidAll.add(key(tx, ty));
         }
       }
     }
-    for (const [, d] of Object.entries(gdefs)) if (d.tile === '#' && !d.hidden) for (const [cx, cy] of d.cover ?? []) solidAll.add(key(cx, cy));
+    for (const [, d] of Object.entries(gdefs)) if (d.tile === '#' && !d.hidden && !d.fake) for (const [cx, cy] of d.cover ?? []) solidAll.add(key(cx, cy));
     const isSolidAll = (x: number, y: number): boolean => solidAll.has(key(Math.max(0, Math.min(COLS - 1, x)), Math.max(0, Math.min(ROWS - 1, y))));
 
-    // Static terrain: one cached texture + merged physics rectangles
-    const tKey = `terrain-${L.id}`;
-    if (!this.textures.exists(tKey)) {
-      this.textures.getTextureKeys().filter((k) => k.startsWith('terrain-') || k.startsWith('grp-')).forEach((k) => this.textures.remove(k));
-      addTerrainTexture(this, tKey, drawTerrain(staticTiles, isSolidAll, this.pal, { x: 0, y: 0, w: WORLD_W, h: WORLD_H }));
+    // Static terrain: an auto-tiled tilemap (only visible tiles are drawn), so levels can
+    // be far wider than any single texture could be.
+    if (!this.textures.exists(`grp-${L.id}-marker`)) {
+      this.textures.getTextureKeys().filter((k) => k.startsWith('grp-')).forEach((k) => this.textures.remove(k));
+      this.textures.addCanvas(`grp-${L.id}-marker`, document.createElement('canvas'));
     }
-    this.track(this.add.image(0, 0, tKey).setOrigin(0).setScale(1 / RES).setDepth(0));
+    const tsKey = `tileset-${this.lvl.world % PALETTES.length}`;
+    makeTerrainTileset(this, tsKey, this.pal);
+    const data: number[][] = [];
+    for (let ty = 0; ty < ROWS; ty++) {
+      const row: number[] = [];
+      for (let tx = 0; tx < COLS; tx++) row.push(this.staticSolid.has(key(tx, ty)) ? ((tx * 7 + ty * 13) % 3) * 16 + maskAt(isSolidAll, tx, ty) : -1);
+      data.push(row);
+    }
+    const F = TILE * RES;
+    const tmap = this.make.tilemap({ data, tileWidth: F, tileHeight: F });
+    const tset = tmap.addTilesetImage(tsKey, tsKey, F, F, TILESET_PAD, TILESET_PAD * 2)!;
+    const layer = tmap.createLayer(0, tset, 0, 0)!;
+    layer.setScale(1 / RES).setDepth(0);
+    this.track(layer);
 
     // Extend solid bottom / top rows past the level edge so wide screens never show floating ground.
     const ext = this.track(this.add.graphics().setDepth(-0.5));
     const outline = Phaser.Display.Color.HexStringToColor(this.pal.outline).color;
     const fillC = Phaser.Display.Color.HexStringToColor(this.pal.block).color;
+    const WW = this.worldW;
     for (const [row, y0, h] of [[ROWS - 1, WORLD_H - 2, 600], [0, -600, 602]] as const) {
       let x = 0;
       while (x < COLS) {
         if (!isSolidAll(x, row)) { x++; continue; }
         let x2 = x;
         while (x2 + 1 < COLS && isSolidAll(x2 + 1, row)) x2++;
-        const ex0 = x === 0 ? -800 : x * TILE, ex1 = x2 === COLS - 1 ? WORLD_W + 800 : (x2 + 1) * TILE;
+        const ex0 = x === 0 ? -800 : x * TILE, ex1 = x2 === COLS - 1 ? WW + 800 : (x2 + 1) * TILE;
         ext.fillStyle(outline, 1).fillRect(ex0, y0, ex1 - ex0, h);
         ext.fillStyle(fillC, 1).fillRect(ex0 + (x === 0 ? 0 : 4), y0, ex1 - ex0 - (x === 0 ? 0 : 4) - (x2 === COLS - 1 ? 0 : 4), h);
         x = x2 + 1;
       }
     }
     // the same for the leftmost / rightmost columns (side pillars)
-    for (const [col, x0] of [[0, -800], [COLS - 1, WORLD_W]] as const) {
+    for (const [col, x0] of [[0, -800], [COLS - 1, WW]] as const) {
       for (let y = 0; y < ROWS; y++) if (isSolidAll(col, y)) ext.fillStyle(fillC, 1).fillRect(x0, y * TILE + (isSolidAll(col, y - 1) ? 0 : 4), 800, TILE + 1);
     }
 
@@ -536,16 +649,24 @@ export class GameScene extends Phaser.Scene {
     this.doorWait = 0;
     this.doorVx = 0;
 
+    // Checkpoint
+    this.cp = cpAt ? { x: cpAt.tx * TILE + TILE / 2, y: (cpAt.ty + 1) * TILE, tx: cpAt.tx } : null;
+    if (this.cp) {
+      this.cpFlag = this.track(this.add.image(this.cp.x - 1, this.cp.y + 1, this.cpActive ? 'flag-on' : 'flag').setOrigin(12 / 40, 79 / 80).setScale(1 / RES).setDepth(1));
+    }
+
     // Hints
     for (const h of L.hints ?? []) {
       const t = this.track(label(this, h.x * TILE + TILE / 2, h.y * TILE + TILE / 2, h.text, 24, '#ffffff', 6).setDepth(-5));
       this.hints.push({ obj: t, after: h.afterDeaths ?? 0 });
-      t.setVisible(this.deathsLevel >= (h.afterDeaths ?? 0));
+      t.setVisible(this.hintVisible(t.x, h.afterDeaths ?? 0));
     }
 
     // Player
     this.gdir = 1;
-    this.player = this.track(this.add.zone(this.spawn.x, this.spawn.y - PHYS.bodyH / 2, PHYS.bodyW, PHYS.bodyH));
+    this.ctrlFlip = false;
+    const start = this.cpActive && this.cp ? { x: this.cp.x + 2, y: this.cp.y } : this.spawn;
+    this.player = this.track(this.add.zone(start.x, start.y - PHYS.bodyH / 2, PHYS.bodyW, PHYS.bodyH));
     this.physics.add.existing(this.player);
     this.pbody = this.player.body as Phaser.Physics.Arcade.Body;
     this.pbody.setAllowGravity(false);
@@ -556,12 +677,24 @@ export class GameScene extends Phaser.Scene {
       const g = (z as Phaser.GameObjects.Zone).getData('grp') as GroupRT;
       return g.solid && g.visible;
     }));
-    this.hero = this.track(new Hero(this, this.spawn.x, this.spawn.y).setDepth(5));
+    this.hero = this.track(new Hero(this, start.x, start.y).setDepth(5));
     this.hero.setScale(0.2);
     this.tweens.add({ targets: this.hero, scaleX: 1, scaleY: 1, duration: 140, ease: 'Back.Out' });
 
     // Triggers
     this.triggers = (L.triggers ?? []).map((def) => ({ def, fired: false }));
+    // Respawning at the checkpoint: everything is re-armed, except "keep" triggers that
+    // lie before the flag (e.g. the door already ran ahead) – their end state is applied.
+    if (this.cpActive && this.cp) {
+      for (const t of this.triggers) {
+        const z = t.def.when.zone;
+        if (t.def.keep && z && z[0] + z[2] <= this.cp.tx) {
+          t.fired = true;
+          if (t.def.id) this.fired.add(t.def.id);
+          this.fastForward(t.def.do);
+        }
+      }
+    }
 
     // Reset sim state
     this.state = 'play';
@@ -575,6 +708,38 @@ export class GameScene extends Phaser.Scene {
     this.slowmo = 0;
     this.lastVy = 0;
     this.applySlowmo();
+    this.flipText?.setVisible(false);
+    if (this.lay) this.snapCamera();
+  }
+
+  /** Apply the end state of actions instantly (used for "keep" triggers at a checkpoint). */
+  private fastForward(actions: Action[]): void {
+    for (const a of actions) {
+      if ('doorRun' in a) {
+        const last = a.doorRun[a.doorRun.length - 1];
+        this.doorPos = { x: last[0] * TILE + TILE / 2, y: (last[1] + 1) * TILE };
+        this.door?.setFace('tired');
+      } else if ('fall' in a) {
+        const g = this.grp(a.fall);
+        g.state = 'gone'; g.visible = false; g.solid = false; g.container.setVisible(false);
+      } else if ('move' in a && a.returnAfter === undefined) {
+        const g = this.grp(a.move);
+        g.ox += a.by[0] * TILE; g.oy += a.by[1] * TILE;
+        for (const z of g.bodies) { const b = z.getData('base'); z.setPosition(b.x + g.ox, b.y + g.oy); }
+      } else if ('pop' in a || 'show' in a) {
+        const g = this.grp('pop' in a ? a.pop : (a as { show: string }).show);
+        g.visible = true; g.container.setVisible(true);
+        for (const s of this.spikes) if (s.group === g) { s.extend = 1; this.placeSpike(s); }
+      } else if ('hide' in a) {
+        const g = this.grp(a.hide);
+        g.visible = false; g.container.setVisible(false);
+      } else if ('gravity' in a) {
+        this.gdir = a.gravity === 'flip' ? -this.gdir : 1;
+        this.hero?.setFlipped(this.gdir < 0);
+      } else if ('controls' in a) {
+        this.ctrlFlip = a.controls === 'flip';
+      }
+    }
   }
 
   private makeGroup(id: string, def: GroupDef, tiles: { tx: number; ty: number }[], isSolidAll: (x: number, y: number) => boolean): void {
@@ -583,7 +748,7 @@ export class GameScene extends Phaser.Scene {
     const g: GroupRT = {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
-      shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false,
+      shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false,
     };
     this.groups.set(id, g);
     const t = def.tile as TileChar;
@@ -592,10 +757,10 @@ export class GameScene extends Phaser.Scene {
       const maxX = Math.max(...tiles.map((v) => v.tx)), maxY = Math.max(...tiles.map((v) => v.ty));
       const k = `grp-${this.lvl.id}-${id}`;
       if (!this.textures.exists(k)) {
-        const own = new Set(tiles.map((v) => v.ty * 100 + v.tx));
-        const seam = (x: number, y: number) => !own.has(y * 100 + x) && this.staticSolid.has(y * 100 + x);
+        const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
+        const seam = (x: number, y: number) => !own.has(y * 1000 + x) && this.staticSolid.has(y * 1000 + x);
         const bounds = { x: minX * TILE - 2, y: minY * TILE - 2, w: (maxX - minX + 1) * TILE + 4, h: (maxY - minY + 1) * TILE + 4 };
-        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 100 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
+        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 1000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
       }
       const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
       container.add(img);
@@ -632,6 +797,7 @@ export class GameScene extends Phaser.Scene {
     if (group) group.container.add(img);
     else this.track(img.setDepth(-1));
     const sp: Spike = { tx, ty, dir, img, group, extend: group && group.def.hidden ? 0 : 1 };
+    if (group?.def.fake) img.setTint(0xf2f2f2);
     this.spikes.push(sp);
     this.placeSpike(sp);
   }
@@ -716,7 +882,8 @@ export class GameScene extends Phaser.Scene {
     const g = this.gdir;
     let vx = b.velocity.x;
     let vy = b.velocity.y;
-    const dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
+    let dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
+    if (this.ctrlFlip) dir = -dir;
     const gr = this.grounded;
     if (dir !== 0) {
       const turning = vx !== 0 && Math.sign(vx) !== dir;
@@ -776,7 +943,18 @@ export class GameScene extends Phaser.Scene {
       if (s.group && (!s.group.visible || s.group.state === 'gone')) continue;
       const h = spikeHit(s.tx, s.ty, s.dir);
       if (s.group) { h.x += s.group.ox; h.y += s.group.oy; }
-      if (overlap(pr, h)) { this.kill('spikes'); return; }
+      if (!overlap(pr, h)) continue;
+      if (s.group?.def.fake) {
+        // fake spikes: squash flat, harmless
+        if (s.img.scaleY > 0.4 / RES) {
+          this.tweens.add({ targets: s.img, scaleY: 0.25 / RES, duration: 90, ease: 'Quad.Out' });
+          if (!this.trollsFired.has(s.group.def.troll ?? '#')) { this.say('fake!', 'hero', 45); this.sfx('pad'); }
+          this.troll(s.group.def.troll);
+        }
+        continue;
+      }
+      this.kill('spikes');
+      return;
     }
     // deadly moving blocks (crushers)
     for (const g of this.groups.values()) {
@@ -798,6 +976,7 @@ export class GameScene extends Phaser.Scene {
       }
       if (!overlap(big, r)) continue;
       if (c.group?.def.trapCoin) {
+        this.troll(c.group.def.troll);
         c.spiky = true;
         c.img.setTexture('coin-spiky');
         this.tweens.killTweensOf(c.img);
@@ -825,6 +1004,7 @@ export class GameScene extends Phaser.Scene {
         this.grounded = false;
         this.coyote = 0;
         this.hero.launch();
+        this.troll(p.group?.def.troll);
         p.img.setTexture('pad-squash');
         this.time.delayedCall(140, () => p.img.active && p.img.setTexture('pad'));
         this.sfx('pad');
@@ -835,6 +1015,8 @@ export class GameScene extends Phaser.Scene {
       const r = { x: f.x - 14, y: f.flipped ? f.y : f.y - 64, w: 28, h: 64 };
       if (overlap(pr, r)) {
         f.door.chomp();
+        this.troll(this.lvl.fakeExits?.[String(Math.round((f.x - TILE / 2) / TILE))] ?? this.lvl.fakeExitTroll);
+        this.say('NOPE!', [f.x / TILE - 0.5, f.y / TILE - 3.2], 50);
         this.sfx('chomp');
         this.kill('fakedoor');
         return;
@@ -852,7 +1034,28 @@ export class GameScene extends Phaser.Scene {
       let inside = false;
       for (const t of g.tiles) if (overlap(big, { x: t.tx * TILE - 10, y: t.ty * TILE - 10, w: TILE + 20, h: TILE + 20 })) inside = true;
       g.container.setAlpha(inside ? 0.45 : 1);
+      if (inside) this.troll(g.def.troll);
     }
+    // checkpoint flag
+    if (this.cp && !this.cpActive && overlap(big, { x: this.cp.x - 20, y: this.cp.y - 80, w: 40, h: 80 })) {
+      this.cpActive = true;
+      this.cpFlag?.setTexture('flag-on');
+      if (this.cpFlag) this.tweens.add({ targets: this.cpFlag, scaleX: 1.25 / RES, scaleY: 1.25 / RES, duration: 120, yoyo: true });
+      this.emitConfetti.emitParticleAt(this.cp.x, this.cp.y - 60, 16);
+      this.say('checkpoint!', 'hero', 60);
+      this.sfx('coin');
+    }
+  }
+
+  private hintVisible(x: number, after: number): boolean {
+    if (after <= 0) return true;
+    let n = 0;
+    for (const d of this.deathXs) if (Math.abs(d - x) < 10 * TILE) n++;
+    return n >= after;
+  }
+
+  private troll(id: string | undefined): void {
+    if (id) this.trollsFired.add(id);
   }
 
   // -------------------------------------------------------------------------
@@ -881,8 +1084,12 @@ export class GameScene extends Phaser.Scene {
       if (!ok) continue;
       t.fired = true;
       if (t.def.id) this.fired.add(t.def.id);
-      if (t.def.delay) this.scheduled.push({ at: this.levelTick + t.def.delay, actions: t.def.do });
-      else this.runActions(t.def.do);
+      this.troll(t.def.troll);
+      if (t.def.delay) this.scheduled.push({ at: this.levelTick + t.def.delay, actions: t.def.do, every: t.def.every });
+      else {
+        this.runActions(t.def.do);
+        if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true });
+      }
     }
   }
 
@@ -890,7 +1097,10 @@ export class GameScene extends Phaser.Scene {
     if (!this.scheduled.length) return;
     const due = this.scheduled.filter((s) => s.at <= this.levelTick);
     this.scheduled = this.scheduled.filter((s) => s.at > this.levelTick);
-    for (const s of due) this.runActions(s.actions);
+    for (const s of due) {
+      this.runActions(s.actions, !!s.repeat);
+      if (s.every) this.scheduled.push({ at: s.at + s.every, actions: s.actions, every: s.every, repeat: true });
+    }
   }
 
   private grp(id: string): GroupRT {
@@ -899,7 +1109,8 @@ export class GameScene extends Phaser.Scene {
     return g;
   }
 
-  private runActions(actions: Action[]): void {
+  /** `quiet`: a repeat of a rhythmic trap – no slow-motion / shocked face every cycle. */
+  private runActions(actions: Action[], quiet = false): void {
     let trap = false;
     for (const a of actions) {
       if ('fall' in a) {
@@ -930,6 +1141,7 @@ export class GameScene extends Phaser.Scene {
         g.chase = { vx: a.vel[0], vy: a.vel[1], untilX: a.untilX };
         g.visible = true;
         g.container.setVisible(true);
+        for (const s of this.spikes) if (s.group === g) { s.extend = 1; this.placeSpike(s); }
         trap = true;
       } else if ('doorRun' in a) {
         this.doorPath = a.doorRun.map(([x, y]) => ({ x: x * TILE + TILE / 2, y: (y + 1) * TILE }));
@@ -950,6 +1162,10 @@ export class GameScene extends Phaser.Scene {
         this.sfx('flip');
         this.cameras.main.flash(120, 255, 255, 255, false);
         trap = true;
+      } else if ('controls' in a) {
+        this.ctrlFlip = a.controls === 'flip';
+        this.flipText.setVisible(this.ctrlFlip);
+        if (this.ctrlFlip) { this.say('huh?!', 'hero', 50); this.sfx('flip'); trap = true; }
       } else if ('say' in a) {
         this.say(a.say, a.at, a.ticks ?? 70);
       } else if ('shake' in a) {
@@ -965,12 +1181,14 @@ export class GameScene extends Phaser.Scene {
       } else if ('hide' in a) {
         const g = this.grp(a.hide);
         g.visible = false;
-        g.container.setVisible(false);
+        this.sfx('crumble');
+        this.tweens.add({ targets: g.container, alpha: 0, scaleY: 0.9, duration: 110, onComplete: () => { g.container.setVisible(false).setAlpha(1).setScale(1); } });
+        trap = true;
       } else if ('scare' in a) {
         trap = true;
       }
     }
-    if (trap) {
+    if (trap && !quiet) {
       this.hero.flash('shock', 0.55);
       this.sfx('trap');
       if (this.slowmo < 9) { this.slowmo = 9; this.applySlowmo(); }
@@ -987,6 +1205,7 @@ export class GameScene extends Phaser.Scene {
   private updateGroups(): void {
     for (const g of this.groups.values()) {
       if (g.state === 'gone') continue;
+      if (g.deadlyEnd) { g.deadlyEnd = false; g.deadlyMove = false; }
       if (g.state === 'shaking') {
         g.shakeT--;
         if (g.shakeT <= 0) { g.state = 'falling'; g.solid = false; g.fallV = 1; }
@@ -1007,7 +1226,7 @@ export class GameScene extends Phaser.Scene {
             this.sfx('slam');
             this.cameras.main.shake(140, 0.008);
           }
-          g.deadlyMove = false;
+          if (g.deadlyMove) g.deadlyEnd = true;
           g.solid = g.def.tile === '#' && !g.def.fake;
           if (m.returnAfter !== undefined && !m.back) {
             g.move = { fx: g.ox, fy: g.oy, tx: m.fx, ty: m.fy, t: -m.returnAfter, dur: m.returnTicks ?? m.dur, deadly: false, back: true };
@@ -1068,6 +1287,7 @@ export class GameScene extends Phaser.Scene {
     else if (at === 'hero') { x = this.pbody.center.x; y = this.pbody.y - 26; }
     else { x = at[0] * TILE + TILE / 2; y = at[1] * TILE + TILE; }
     const c = bubble(this, x, y, text);
+    this.worldLayer.add(c);
     this.bubbles.push({ c, until: this.levelTick + ticks, follow: at === 'door' ? 'door' : at === 'hero' ? 'hero' : undefined });
   }
 
@@ -1080,6 +1300,7 @@ export class GameScene extends Phaser.Scene {
     this.stateT = 0;
     this.lastDeath = cause;
     this.deathsLevel++;
+    this.deathXs.push(this.pbody.center.x);
     Save.addDeath(this.lvl.id);
     this.updateDeathText(true);
     this.hero.die();
@@ -1105,6 +1326,7 @@ export class GameScene extends Phaser.Scene {
   restartLevel(): void {
     if (this.overlay) this.closeOverlay();
     this.paused = false;
+    this.cpActive = false;
     this.clearLevel();
     this.buildLevel();
   }
@@ -1158,7 +1380,10 @@ export class GameScene extends Phaser.Scene {
   private makeOverlay(): Phaser.GameObjects.Container {
     this.closeOverlay();
     const c = this.add.container(0, 0).setDepth(200);
+    this.uiLayer.add(c);
+    this.cameras.main.ignore(c);
     const dim = this.add.rectangle(0, 0, 10, 10, 0x2b2d42, 0.55).setOrigin(0).setName('dim').setInteractive();
+    this.cameras.main.ignore(dim);
     c.add(dim);
     this.overlay = c;
     this.fitDim();
@@ -1234,11 +1459,29 @@ export class GameScene extends Phaser.Scene {
     const keep = this.bubbles.filter((x) => x.until > this.levelTick);
     for (const x of this.bubbles) if (x.until <= this.levelTick) x.c.destroy();
     this.bubbles = keep;
-    for (const h of this.hints) h.obj.setVisible(this.deathsLevel >= h.after);
+    for (const h of this.hints) h.obj.setVisible(this.hintVisible(h.obj.x, h.after));
+    // camera: smooth follow with a little look-ahead in the running direction
+    if (this.state === 'play') {
+      const look = Phaser.Math.Clamp(b.velocity.x * 0.35, -110, 110);
+      const k = 1 - Math.pow(0.004, Math.min(dt, 0.05));
+      this.camX += (b.center.x + look - this.camX) * k;
+      this.camY += (b.center.y - 40 * this.gdir - this.camY) * k * 0.8;
+    }
+    this.applyCamera();
   }
 
   // -------------------------------------------------------------------------
   // Test hooks
+
+  /** Test hook: put the camera on the hero immediately (after a fast-forward). */
+  debugSnapCamera(): void {
+    this.snapCamera();
+  }
+
+  /** Test hook: kill the hero right now (used to check checkpoint respawns). */
+  debugKill(): void {
+    this.kill('test');
+  }
 
   snapshot(): Snapshot {
     const b = this.pbody;
@@ -1247,6 +1490,9 @@ export class GameScene extends Phaser.Scene {
       x: b.center.x, y: b.center.y, vx: b.velocity.x, vy: b.velocity.y, grounded: this.grounded,
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
+      trolls: [...this.trollsFired], checkpoint: this.cpActive, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
+      hudDeaths: this.deathText.text, cpX: this.cp ? this.cp.x : -1, zoom: this.cameras.main.zoom,
+      viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE,
     };
   }
 }
@@ -1259,24 +1505,24 @@ function approach(v: number, target: number, step: number): number {
 
 /** Greedy merge of tiles into rectangles (fewer physics bodies, no seams). */
 function mergeRects(tiles: { tx: number; ty: number }[]): { x: number; y: number; w: number; h: number }[] {
-  const set = new Set(tiles.map((t) => t.ty * 100 + t.tx));
+  const set = new Set(tiles.map((t) => t.ty * 1000 + t.tx));
   const used = new Set<number>();
   const out: { x: number; y: number; w: number; h: number }[] = [];
   const sorted = [...tiles].sort((a, b) => a.ty - b.ty || a.tx - b.tx);
   for (const t of sorted) {
-    const k = t.ty * 100 + t.tx;
+    const k = t.ty * 1000 + t.tx;
     if (used.has(k)) continue;
     let w = 1;
-    while (set.has(t.ty * 100 + t.tx + w) && !used.has(t.ty * 100 + t.tx + w)) w++;
+    while (set.has(t.ty * 1000 + t.tx + w) && !used.has(t.ty * 1000 + t.tx + w)) w++;
     let h = 1;
     outer: for (;;) {
       for (let i = 0; i < w; i++) {
-        const kk = (t.ty + h) * 100 + t.tx + i;
+        const kk = (t.ty + h) * 1000 + t.tx + i;
         if (!set.has(kk) || used.has(kk)) break outer;
       }
       h++;
     }
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 100 + t.tx + i);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 1000 + t.tx + i);
     out.push({ x: t.tx, y: t.ty, w, h });
   }
   return out;
