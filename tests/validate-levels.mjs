@@ -3,11 +3,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeLevel } from './softlock.mjs';
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'levels');
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
-const LEGAL = new Set(['.', '#', '^', 'v', '<', '>', '=', 'o', 'P', 'D', 'F', 'C']);
-const MIN_W = 32, MAX_W = 200, MAX_GROUP_W = 50;
+const LEGAL = new Set(['.', '#', '^', 'v', '<', '>', '=', 'o', '*', 'P', 'D', 'F', 'C']);
+const MIN_W = 32, MAX_W = 260, MAX_GROUP_W = 50;
+const typeOwner = {};
+const levels = [];
 let errors = 0;
 const fail = (f, m) => { errors++; console.error(`✗ ${f}: ${m}`); };
 
@@ -66,7 +69,28 @@ files.forEach((f, idx) => {
   const trolls = L.trolls || [];
   if (trolls.length < 5) fail(f, `only ${trolls.length} troll moments (need at least 5)`);
   for (const t of trolls) if (!referenced.has(t.id)) fail(f, `troll "${t.name}" is never triggered by anything`);
-  console.log(`✓ ${f}  "${L.name}"  ${W} tiles, ${trolls.length} trolls`);
+  for (const t of trolls) {
+    if (!t.type || !t.hint || typeof t.x !== 'number' || !t.w) fail(f, `troll "${t.name}" needs type, x, w and hint`);
+    if (t.x < 0 || t.x + t.w > W) fail(f, `troll "${t.name}" region is outside the map`);
+    if (typeOwner[t.type] !== undefined && typeOwner[t.type] !== L.id) fail(f, `trap type "${t.type}" is also used by level ${typeOwner[t.type]} – every level must have its own trap types`);
+    typeOwner[t.type] = L.id;
+  }
+  // no in-game text hints except the level-1 control instructions
+  if ((L.hints || []).length && L.id !== 1) fail(f, 'text hints are only allowed in level 1 (control instructions)');
+  if ((L.hints || []).some((h) => 'afterDeaths' in h)) fail(f, 'hints after deaths are not allowed');
+  levels.push({ f, L, W });
+  // no soft-locks: from every reachable place the hero can reach the EXIT or die
+  const sl = analyzeLevel(L);
+  const spots = [...new Set(sl.stuck.map((p) => `col ${p.x} row ${p.y}`))];
+  if (spots.length) fail(f, `soft-lock (no way out, no way to die) at ${spots.join('; ')} [world states: ${[...new Set(sl.stuck.map((p) => p.state))].join(', ')}]`);
+  if (sl.maxX < W - 2) fail(f, `soft-lock analysis only covered columns up to ${sl.maxX} of ${W}`);
+  console.log(`✓ ${f}  "${L.name}"  ${W} tiles, ${trolls.length} trolls, no soft-locks (${sl.states} world states, ${sl.reached} reachable spots checked)`);
 });
+// distinct palettes / main ideas
+const worlds = levels.map((x) => x.L.world);
+if (new Set(worlds).size !== worlds.length) fail('levels', `palettes must differ per level (world indices: ${worlds})`);
+const ideas = levels.map((x) => x.L.idea);
+if (ideas.some((i) => !i) || new Set(ideas).size !== ideas.length) fail('levels', 'every level needs its own main idea');
+console.log(`\nTrap types: ${Object.keys(typeOwner).length}, each used by exactly one level.`);
 if (errors) { console.error(`\n${errors} problem(s) found`); process.exit(1); }
 console.log(`\nAll ${files.length} levels valid.`);

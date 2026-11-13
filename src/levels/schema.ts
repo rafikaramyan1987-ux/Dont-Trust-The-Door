@@ -7,6 +7,7 @@
  *   ^  spike (points up)     v  spike (points down)
  *   <  spike (points left)   >  spike (points right)
  *   =  jump pad              o  coin (a harmless, genuine coin)
+ *   *  spiked ball (deadly)
  *   P  player start          D  the EXIT door (bottom tile of the door)
  *   F  a FAKE exit door (bites when touched)
  *   C  checkpoint flag (exactly one per level; death after touching it respawns there)
@@ -14,7 +15,7 @@
  *        is (block, spike, coin, pad …) and triggers can make the group do things.
  */
 
-export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o';
+export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F';
 
 export interface GroupDef {
   /** What every tile of this group is. */
@@ -34,6 +35,10 @@ export interface GroupDef {
   cover?: [number, number][];
   /** Troll id (see LevelData.trolls) credited when this group's built-in trick fires. */
   troll?: string;
+  /** Jump pads: launch velocity [vx, vy] in px/s (default straight up). */
+  launch?: [number, number];
+  /** Jump pads: a dud that only squeaks and does not launch. */
+  dud?: boolean;
 }
 
 export type Rect = [number, number, number, number]; // tile x, y, w, h
@@ -58,11 +63,14 @@ export type Action =
   | { pop: string }
   | { retract: string }
   | { move: string; by: [number, number]; ticks: number; deadly?: boolean; returnAfter?: number; returnTicks?: number }
-  | { chase: string; vel: [number, number]; untilX?: number }
+  | { chase: string; vel: [number, number]; untilX?: number; untilY?: number }
   | { doorRun: [number, number][]; speed: number; hehe?: number }
   | { doorHehe: number }
   | { gravity: 'flip' | 'normal' }
-  | { controls: 'flip' | 'normal' }
+  | { controls: 'flip' | 'normal' | 'nojump' | 'autorun' }
+  | { gravityScale: number }
+  | { camera: 'freeze' | 'follow' | 'flip' | 'unflip' | 'zoom' | 'unzoom' }
+  | { fakeClear: boolean }
   | { say: string; at: 'door' | 'hero' | [number, number]; ticks?: number }
   | { shake: number; ticks?: number }
   | { slowmo: number }
@@ -87,24 +95,32 @@ export interface TriggerDef {
   keep?: boolean;
 }
 
+/** On-screen text. Only the level-1 control instructions use this (shown once ever). */
 export interface HintDef {
   x: number;
   y: number;
   text: string;
-  /** Only show after the player has died at least this many times within ~10 tiles of it. */
-  afterDeaths?: number;
 }
 
 export interface TrollDef {
   id: string;
   /** Short description, e.g. "The floor collapses into spikes". */
   name: string;
+  /** Trap type key; a type may only be used by ONE level (checked by the validator). */
+  type: string;
+  /** Where the trap is (tile x and width) – used by the hint button. */
+  x: number;
+  w: number;
+  /** The one-line hint shown when the player spends the level's hint on this trap. */
+  hint: string;
 }
 
 export interface LevelData {
   id: number;
   name: string;
   world: number;
+  /** The level's main idea (each level has its own). */
+  idea?: string;
   /** Shown on the level-complete card. */
   winMessage: string;
   /** Small caption shown when the player dies here (optional). */

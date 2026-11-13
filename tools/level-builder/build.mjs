@@ -60,16 +60,18 @@ class Builder {
     return id;
   }
   groupTroll(g, trollId) { this.groups[g].troll = trollId; }
-  troll(name) {
+  /** Register a troll moment: its trap type, where it is (local tile x/width) and its hint. */
+  troll(name, { type, x, w, hint }) {
+    if (!type || !hint || x === undefined || !w) throw new Error(`troll "${name}" needs type, x, w and hint`);
     let n = name, k = 2;
     while (this.trolls.some((t) => t.name === n)) n = `${name} (${k++})`;
     const id = `t${this.trolls.length + 1}`;
-    this.trolls.push({ id, name: n });
+    this.trolls.push({ id, name: n, type, x: this.x0 + x, w, hint });
     return id;
   }
+  tutorial(x, y, text) { this.hints.push({ x: this.x0 + x, y, text }); }
   trollName(id) { return this.trolls.find((t) => t.id === id).name; }
   trigger(def) { this.triggers.push(def); }
-  hint(x, y, text, afterDeaths) { this.hints.push({ x: this.x0 + x, y, text, ...(afterDeaths ? { afterDeaths } : {}) }); }
   uid(p) { return `${p}${++this.uids}`; }
   doorAt(x, y) {
     if (this.hasDoor) throw new Error('two EXIT doors');
@@ -111,9 +113,11 @@ function compile(spec) {
   b = out.b;
   const segs = out.segs;
   const W = b.cols;
-  const map = b.grid.map((row) => { const r = row.slice(); while (r.length < W) r.push('.'); return r.join(''); });
+  const rows = b.grid.map((row) => { const r = row.slice(); while (r.length < W) r.push('.'); return r; });
+  if (spec.cave) for (let y = 0; y < spec.cave; y++) for (let x = 0; x < W; x++) if (rows[y][x] === '.') rows[y][x] = '#';
+  const map = rows.map((r) => r.join(''));
   const level = {
-    id: spec.id, name: spec.name, world: spec.world, winMessage: spec.winMessage,
+    id: spec.id, name: spec.name, world: spec.id - 1, idea: spec.idea, winMessage: spec.winMessage,
     deathQuips: spec.deathQuips, hints: b.hints, map, groups: b.groups, triggers: b.triggers,
     trolls: b.trolls, fakeExits: Object.keys(b.fakeExits).length ? b.fakeExits : undefined,
   };
@@ -133,66 +137,60 @@ function compile(spec) {
 // ---------------------------------------------------------------------------
 // The 10 levels. Each line is a segment; [fn, opts, label] puts a label at its start.
 
+const sky = { sky: true };
 const LEVELS = [
   {
-    id: 1, slug: 'hello-floor', name: 'Hello, Floor', world: 0, winMessage: 'Welcome. Trust nothing.',
-    deathQuips: ['Oops!', 'Mind the gap!', 'The floor did that.', 'Wait for it...'],
-    segments: [S.start, [S.steps, { hints: true }], [S.flat, 4], S.sink, [S.doorRun, (b) => ({ to: b.at('end') + 4 })],
-      [S.pit, 3], [S.collapse, { cracked: true, shake: 10 }], [S.flat, 3], S.pulse, S.checkpoint, S.upper, S.ceilingSpikes, [S.flat, 4], S.boost,
-      S.sink, [S.endFlee, {}, 'end']],
+    id: 1, slug: 'hello-floor', name: 'Hello, Floor', idea: 'The floor is not what it seems', winMessage: 'Welcome. Trust nothing.',
+    deathQuips: ['Oops!', 'The floor did that.', 'Ouch.', 'Hmm.'],
+    segments: [[S.start, { tutorial: true }], S.meadow, S.l1Sink, S.l1Fake, S.meadow, S.l1Collapse, S.checkpoint, S.l1Bridge, S.meadow,
+      S.l1Fake, S.l1Sink, S.l1Collapse, S.end],
   },
   {
-    id: 2, slug: 'solid-ground', name: 'Solid Ground?', world: 0, winMessage: 'The floor lied. Repeatedly.',
-    deathQuips: ['The floor lied.', 'Still lying.', 'Never trust a floor.', 'Keep moving!'],
-    segments: [S.start, S.collapse, S.sink, S.fakeFloor, [S.pit, 3], S.bridge, S.checkpoint,
-      [S.collapse, { shake: 2 }], [S.vanish, { delay: 20 }], S.upper, S.fakeFloor, S.popBlock, [S.popLanding, { mode: 'long' }], S.tower, [S.collapse, { width: 4 }], [S.endDoor, { sinkLast: true }]],
+    id: 2, slug: 'greedy-blob', name: 'Greedy Little Blob', idea: '"Safe" coins are traps', winMessage: "Money isn't everything.",
+    deathQuips: ['Greedy!', 'That coin had teeth.', 'Shiny... ouch.', 'Worth it?'],
+    segments: [S.start, S.l2Routes, S.l2Bite, S.l2Arc, S.l2Cursed, S.checkpoint, S.l2Trail, S.l2Bite, S.l2Routes, S.l2Arc, S.l2Cursed, S.end],
   },
   {
-    id: 3, slug: 'exit-stage-left', name: 'Exit, Stage Left', world: 0, winMessage: "Doors shouldn't have legs.",
-    deathQuips: ['It ran away?!', 'Come back here!', 'Wrong door!', 'Chase it!'],
-    segments: [S.start, [S.flat, 4], [S.doorRun, (b) => ({ to: b.at('wait') + 4 })], [S.popLanding, { mode: 'short' }], [S.pit, 3], S.fakeExit, S.tunnel,
-      S.checkpoint, S.collapse, [S.doorWait, (b) => ({ to: b.at('end') + 4 }), 'wait'], S.vanish, S.ceilingSpikes, S.upper, S.fakeExit, [S.endFlee, {}, 'end']],
+    id: 3, slug: 'spring-fever', name: 'Spring Fever', idea: 'Springs', winMessage: 'What goes up... gets spiked.',
+    deathQuips: ['Boing... ouch.', 'Too much spring!', 'Splat.', 'Whee— oh.'],
+    segments: [[S.start, sky], S.l3Ceiling, S.l3Dud, S.l3Hidden, [S.checkpoint, sky], S.l3Side, S.l3Hidden, S.l3Dud, [S.end, sky]],
   },
   {
-    id: 4, slug: 'landing-zone', name: 'Landing Zone', world: 1, winMessage: 'Seriously?!',
-    deathQuips: ['Seriously?!', 'They were waiting.', 'Land somewhere else!', 'Those were fake?!'],
-    segments: [S.start, S.steps, [S.popLanding, { mode: 'short' }], S.fakeSpikes, [S.pit, 3], [S.popLanding, { mode: 'long' }], S.pulse,
-      S.checkpoint, S.popBlock, S.ceilingSpikes, S.fakeSpikes, S.tunnel, S.bridge, S.collapse, [S.flat, 4], S.endDoor],
+    id: 4, slug: 'heavy-ceiling', name: 'Heavy Ceiling', idea: 'Falling ceilings', winMessage: 'The scary spikes were the safe spot.', cave: 2,
+    deathQuips: ['Squish.', 'Pancake mode.', 'Flat.', 'Bonk.'],
+    segments: [S.start, S.l4Cave, S.l4Drop, S.l4Crusher, S.l4Thwomp, S.checkpoint, S.l4Tunnel, S.l4Thwomp, S.l4Drop, S.l4Cave, S.end],
   },
   {
-    id: 5, slug: 'heavy-ceiling', name: 'Heavy Ceiling', world: 1, winMessage: 'The scary spikes were the safe spot.',
-    deathQuips: ['Squish.', 'Pancake mode.', 'Look up!', 'Time it!'],
-    segments: [S.start, [S.flat, 4], S.ceilingSpikes, S.crusher, [S.pit, 3], S.thwomp, S.pulse, S.checkpoint,
-      S.collapse, S.crusher, S.tunnel, S.thwomp, [S.popLanding, { mode: 'long' }], S.ceilingSpikes, S.endDoor],
+    id: 5, slug: 'left-is-right', name: 'Left Is Right', idea: 'The controls betray you', winMessage: 'Your fingers lied to you.',
+    deathQuips: ['Huh?!', 'Wrong way!', 'Not my fault!', 'Whoops.'],
+    segments: [S.start, S.l5Corridor, S.l5Swap, S.l5NoJump, S.checkpoint, S.l5AutoRun, S.l5Corridor, S.l5NoJump, S.l5Swap, S.l5AutoRun, S.end],
   },
   {
-    id: 6, slug: 'spring-fever', name: 'Spring Fever', world: 1, winMessage: 'What goes up... gets spiked.',
-    deathQuips: ['Too much spring!', 'Boing... ouch.', 'Steer back!', "Don't stop!"],
-    segments: [S.start, S.boost, [S.flat, 4], S.spring, S.vanish, S.checkpoint, S.popBlock, S.spring,
-      S.fakeFloor, S.boost, [S.popLanding, { mode: 'short' }], S.thwomp, S.collapse, S.endDoor],
+    id: 6, slug: 'upside-downer', name: 'Upside Downer', idea: 'Gravity', winMessage: 'Which way is up?!',
+    deathQuips: ['Wrong way up!', 'Gravity says hi.', 'Floaty...', 'Heavy...'],
+    segments: [S.start, S.l6Dual, S.l6Flip, S.l6Low, S.checkpoint, S.l6Heavy, S.l6Low, S.l6Heavy, S.end],
   },
   {
-    id: 7, slug: 'two-doors', name: 'Too Many Doors', world: 2, winMessage: 'Wrong door. Right wall.',
-    deathQuips: ['NOPE!', 'That door bites.', 'Doors lie. Walls too.', 'Look closer...'],
-    segments: [S.start, [S.flat, 4], S.fakeExit, S.fakeFloor, S.fakeSpikes, [S.pit, 3], S.bridge, S.checkpoint,
-      S.vanish, S.fakeExit, S.pulse, S.collapse, S.tower, [S.popLanding, { mode: 'long' }], S.endHidden],
+    id: 7, slug: 'too-many-doors', name: 'Too Many Doors', idea: 'The EXIT keeps changing its mind', winMessage: 'Wrong door. Right wall.',
+    deathQuips: ['NOPE!', 'That door bites.', 'Not that one!', 'Rude.'],
+    segments: [S.start, S.l7FakeExit, [S.l7Runaway, (b) => ({ to: b.at('swap') + 6 })], S.l7Wall, S.checkpoint, S.l7Wall,
+      [S.l7Swap, (b) => ({ to: b.at('end') + 8 }), 'swap'], S.l7FakeExit, S.l7Wall, S.l7Wall, [S.l7HiddenEnd, {}, 'end']],
   },
   {
-    id: 8, slug: 'upside-downer', name: 'Upside Downer', world: 2, winMessage: 'Which way is up?!',
-    deathQuips: ['Wrong way up!', 'Gravity says hi.', 'Left is right?!', 'Let go!'],
-    segments: [S.start, S.gravity, S.controlFlip, S.tunnel, S.checkpoint, S.thwomp, S.vanish, S.gravity, S.controlFlip, S.fakeFloor, S.crusher, S.endDoor],
+    id: 8, slug: 'screen-lies', name: 'Screen Lies', idea: 'The camera lies', winMessage: 'Seeing is NOT believing.',
+    deathQuips: ['Where did it go?', 'I saw nothing!', 'Lies!', 'Blind luck... none.'],
+    segments: [S.start, S.l8Freeze, S.l8Flip, S.l8Zoom, S.l8FakeClear, S.l8Flip, S.checkpoint, S.l8Zoom, S.l8FakeClear, S.l8Freeze, S.l8Flip, S.end],
   },
   {
-    id: 9, slug: 'greedy-blob', name: 'Greedy Little Blob', world: 2, winMessage: "Money isn't everything.",
-    deathQuips: ['Greedy!', 'That coin had teeth.', 'Not all that glitters...', 'Hop UNDER them.'],
-    segments: [S.start, S.coins, S.fakeFloor, S.controlFlip, S.bridge, S.checkpoint, S.popBlock, S.coins, S.vanish, S.tunnel, S.thwomp,
-      S.crusher, [S.endDoor, { sinkLast: true }]],
+    id: 9, slug: 'run', name: 'Run!', idea: 'Something is always chasing you', winMessage: 'You outran everything.',
+    deathQuips: ['Too slow!', 'Caught!', 'RUN!', 'Faster...'],
+    segments: [S.start, S.l9Ball, S.l9Wall, S.l9Flood, S.l9Ball, S.checkpoint, S.l9Wall, S.l9Flood, S.l9Ball, S.l9Wall, S.end],
   },
   {
-    id: 10, slug: 'grand-betrayal', name: 'The Grand Betrayal', world: 3, winMessage: 'You out-trolled the door!',
-    deathQuips: ['RUN!', 'Keep moving!', 'The floor too?!', 'Everything lies!', 'Almost!'],
-    segments: [S.start, [S.doorRun, (b) => ({ to: b.at('wait') + 4 })], S.chase, S.spring, S.pulse, S.checkpoint,
-      [S.doorWait, (b) => ({ to: b.at('end') + 4 }), 'wait'], S.gravity, S.thwomp, S.fakeExit, S.collapse, S.vanish, [S.endFlee, {}, 'end']],
+    id: 10, slug: 'grand-betrayal', name: 'The Grand Betrayal', idea: 'Moving platforms betray you', winMessage: 'You out-trolled them all!',
+    deathQuips: ['Betrayed!', 'Not again...', 'Trust issues.', 'Almost!'],
+    segments: [[S.start, sky], S.l10Shuttle, S.l10Shy, S.l10Blink, S.l10Elevator, S.l10Shy, [S.checkpoint, sky], S.l10Shuttle, S.l10Elevator,
+      S.l10Blink, S.l10Shy, S.l10Shuttle, [S.end, sky]],
   },
 ];
 
@@ -209,6 +207,15 @@ for (const spec of LEVELS) {
   writeFileSync(join(dir, `${String(spec.id).padStart(2, '0')}-${spec.slug}.json`), txt + '\n');
   allPlans[spec.id] = plans;
   console.log(`level ${spec.id} "${spec.name}": ${width} tiles, ${level.trolls.length} trolls`);
+}
+// every trap type may belong to one level only
+const owner = {};
+for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+  const L = JSON.parse((await import('node:fs')).readFileSync(join(dir, f), 'utf8'));
+  for (const t of L.trolls) {
+    if (owner[t.type] !== undefined && owner[t.type] !== L.id) throw new Error(`trap type "${t.type}" used by levels ${owner[t.type]} and ${L.id}`);
+    owner[t.type] = L.id;
+  }
 }
 const planFile = join(ROOT, 'tests', 'plans.json');
 let existing = {};

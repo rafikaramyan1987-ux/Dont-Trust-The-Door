@@ -381,7 +381,7 @@ function drawSpikes(ctx: C2D): void {
   }
 }
 
-function drawPad(ctx: C2D, squashed: boolean): void {
+function drawPad(ctx: C2D, squashed: boolean, style: 'normal' | 'dud' | 'side' = 'normal'): void {
   const top = squashed ? 26 : 16;
   // spring coils
   ctx.strokeStyle = OUT;
@@ -402,8 +402,8 @@ function drawPad(ctx: C2D, squashed: boolean): void {
   // top plate
   rr(ctx, 2, top - 4, 36, 9, 4.5);
   const g = ctx.createLinearGradient(0, top - 4, 0, top + 5);
-  g.addColorStop(0, '#ff7d7d');
-  g.addColorStop(1, '#e0384a');
+  g.addColorStop(0, style === 'dud' ? '#c9a27a' : style === 'side' ? '#7de0ff' : '#ff7d7d');
+  g.addColorStop(1, style === 'dud' ? '#9a7550' : style === 'side' ? '#2f9fd0' : '#e0384a');
   ctx.fillStyle = g;
   ctx.fill();
   ctx.lineWidth = 3;
@@ -411,6 +411,15 @@ function drawPad(ctx: C2D, squashed: boolean): void {
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   rr(ctx, 7, top - 2, 12, 2.5, 1.2);
   ctx.fill();
+  if (style === 'side') {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(26, top - 2); ctx.lineTo(33, top + 0.5); ctx.lineTo(26, top + 3); ctx.closePath(); ctx.fill();
+  }
+  if (style === 'dud') {
+    ctx.fillStyle = 'rgba(120,70,30,0.6)';
+    ellipse(ctx, 12, top, 2, 1.4); ctx.fill();
+    ellipse(ctx, 27, top + 1, 1.6, 1.2); ctx.fill();
+  }
 }
 
 function drawCoin(ctx: C2D, spiky: boolean): void {
@@ -452,6 +461,40 @@ function drawCoin(ctx: C2D, spiky: boolean): void {
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.fill();
   }
+}
+
+/** A grumpy spiked ball, centred in a 40×40 tile. */
+function drawBall(ctx: C2D): void {
+  const cx = 20, cy = 20;
+  ctx.beginPath();
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2;
+    const r = i % 2 ? 13 : 19;
+    ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#c9cfe0';
+  ctx.fill();
+  ctx.lineWidth = 2.6;
+  ctx.strokeStyle = OUT;
+  ctx.stroke();
+  ellipse(ctx, cx, cy, 13, 13);
+  const g = ctx.createRadialGradient(cx - 4, cy - 5, 1, cx, cy, 14);
+  g.addColorStop(0, '#8a8fa8');
+  g.addColorStop(1, '#3d4157');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 8, cy - 5); ctx.lineTo(cx - 2, cy - 2);
+  ctx.moveTo(cx + 8, cy - 5); ctx.lineTo(cx + 2, cy - 2);
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ellipse(ctx, cx - 4, cy + 1, 1.8, 1.8); ctx.fill();
+  ellipse(ctx, cx + 4, cy + 1, 1.8, 1.8); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy + 9, 4, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke();
 }
 
 function drawSkull(ctx: C2D): void {
@@ -558,6 +601,16 @@ function drawIcon(ctx: C2D, kind: string): void {
       ctx.beginPath(); ctx.arc(16, 13, 6, Math.PI, 0); ctx.stroke();
       rr(ctx, 7, 13, 18, 13, 3); ctx.fill();
       break;
+    case 'bulb': {
+      ellipse(ctx, 16, 13, 8.5, 8.5); ctx.fill();
+      rr(ctx, 12, 19, 8, 6, 2); ctx.fill();
+      ctx.fillStyle = 'rgba(43,45,66,0.55)';
+      rr(ctx, 12.5, 26, 7, 2.2, 1); ctx.fill();
+      rr(ctx, 13.5, 29, 5, 2, 1); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.2;
+      for (const [x1, y1, x2, y2] of [[3, 13, 0.5, 13], [29, 13, 31.5, 13], [6, 4, 4, 2], [26, 4, 28, 2]]) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+      break;
+    }
     case 'star': {
       ctx.beginPath();
       for (let i = 0; i < 10; i++) {
@@ -775,12 +828,17 @@ export function generateTextures(scene: Phaser.Scene): void {
   [c, ctx] = canvas(TILE, TILE); drawSpikes(ctx); add(scene, 'spike', c);
   [c, ctx] = canvas(TILE, TILE); drawPad(ctx, false); add(scene, 'pad', c);
   [c, ctx] = canvas(TILE, TILE); drawPad(ctx, true); add(scene, 'pad-squash', c);
+  [c, ctx] = canvas(TILE, TILE); drawPad(ctx, false, 'dud'); add(scene, 'pad-dud', c);
+  [c, ctx] = canvas(TILE, TILE); drawPad(ctx, true, 'dud'); add(scene, 'pad-dud-squash', c);
+  [c, ctx] = canvas(TILE, TILE); drawPad(ctx, false, 'side'); add(scene, 'pad-side', c);
+  [c, ctx] = canvas(TILE, TILE); drawPad(ctx, true, 'side'); add(scene, 'pad-side-squash', c);
+  [c, ctx] = canvas(TILE, TILE); drawBall(ctx); add(scene, 'ball', c);
   [c, ctx] = canvas(32, 32); drawCoin(ctx, false); add(scene, 'coin', c);
   [c, ctx] = canvas(32, 32); drawCoin(ctx, true); add(scene, 'coin-spiky', c);
   [c, ctx] = canvas(32, 32); drawSkull(ctx); add(scene, 'skull', c);
   [c, ctx] = canvas(40, 80); drawFlag(ctx, false); add(scene, 'flag', c);
   [c, ctx] = canvas(40, 80); drawFlag(ctx, true); add(scene, 'flag-on', c);
-  for (const k of ['pause', 'restart', 'sound', 'mute', 'left', 'right', 'up', 'menu', 'play', 'lock', 'star']) {
+  for (const k of ['pause', 'restart', 'sound', 'mute', 'left', 'right', 'up', 'menu', 'play', 'lock', 'star', 'bulb']) {
     [c, ctx] = canvas(32, 32); drawIcon(ctx, k); add(scene, `icon-${k}`, c);
   }
 

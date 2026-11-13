@@ -1,7 +1,6 @@
 // Captures marketing media from the real game (production build, deterministic replays):
 //   docs/media/screens/*.png   title, hero expressions, funniest moment of every level
-//   docs/media/trailer-9x16.mp4  20 s vertical video (clip list below is tied to the first,
-//                                single-screen slice; run with --video-only to re-record)
+//   docs/media/trailer-9x16.mp4  20 s vertical video (run with --video-only to re-record)
 // Usage: npm run build && node tools/capture-media.mjs [--screens-only|--video-only]
 // Requires ffmpeg on PATH and Python 3 with Pillow (for compositing the vertical video).
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
@@ -17,7 +16,12 @@ rmSync(TMP, { recursive: true, force: true });
 mkdirSync(join(TMP, 'frames'), { recursive: true });
 const args = new Set(process.argv.slice(2));
 const R = (l) => JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-${String(l).padStart(2, '0')}.json`), 'utf8'));
-const pick = (l, which) => (which === 'win' ? R(l).win : (R(l).traps[which] ?? Object.values(R(l).traps)[which]).rec);
+const pick = (l, which) => {
+  if (which === 'win') return { rec: R(l).win, cp: false };
+  const k = Object.keys(R(l).traps).find((n) => n.startsWith(which));
+  if (!k) throw new Error(`level ${l}: no trap replay "${which}"`);
+  return R(l).traps[k];
+};
 
 const { server, url } = await serveDist();
 const browser = await launch();
@@ -31,7 +35,13 @@ const browser = await launch();
  */
 async function advance(page, lvl, rec, until, extra = 0, warm = 30, checkpoint = false) {
   let cond = until;
-  if (until.startsWith('troll:')) {
+  if (until.startsWith('near:')) {
+    // start a little before the troll's region (the hero walks into frame)
+    const L = JSON.parse(readFileSync(join(ROOT, 'src', 'levels', readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort()[lvl - 1]), 'utf8'));
+    const t = L.trolls.find((x) => x.name.startsWith(until.slice(5)));
+    if (!t) throw new Error(`level ${lvl}: no troll "${until}"`);
+    cond = `s.x >= ${(t.x - 4) * 40}`;
+  } else if (until.startsWith('troll:')) {
     const L = JSON.parse(readFileSync(join(ROOT, 'src', 'levels', readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort()[lvl - 1]), 'utf8'));
     const t = L.trolls.find((x) => x.name.startsWith(until.slice(6)));
     if (!t) throw new Error(`level ${lvl}: no troll "${until}"`);
@@ -77,16 +87,16 @@ if (!args.has('--video-only')) {
 
   // [level, replay ('win' or trap name prefix), until, extra frames, caption]
   const moments = [
-    [1, 'win', 'troll:The EXIT grows legs', 34, 'the EXIT grows legs and runs off over the level'],
-    [2, 'The bridge crumbles', 'troll:The bridge crumbles', 30, 'the bridge crumbles under you'],
-    [3, 'A fake EXIT that bites (2)', 's.state==="dead"', 5, 'a fake EXIT bites'],
-    [4, 'Hidden spikes behind the fake ones', 's.state==="dead"', 2, 'the fake spikes were harmless – the landing spot was not'],
-    [5, 'The ceiling falls (safe spot: under the bolted spikes)', 's.state==="dead"', 2, 'the heavy ceiling'],
-    [6, 'The jump pad launches you into ceiling spikes', 'troll:The jump pad launches', 16, 'boing… straight at the spikes'],
-    [7, 'win', 'troll:The real EXIT hides inside the wall', 3, 'the real EXIT hides inside the wall'],
-    [8, 'Left and right swap', 'troll:Left and right swap', 22, 'left and right swap'],
-    [9, 'The coin arc over the pit bites', 's.state==="dead"', 3, 'that coin had teeth'],
-    [10, 'A spike wall chases you', 'troll:A spike wall chases you', 40, 'the spike wall chases you'],
+    [1, 'The bridge crumbles behind you', 'troll:The bridge crumbles', 30, 'the bridge crumbles behind you'],
+    [2, 'The coin arc over the pit bites', 's.state==="dead"', 3, 'that coin had teeth'],
+    [3, 'A sideways spring flings you', 'troll:A sideways spring', 14, 'a sideways spring flings you into spikes'],
+    [4, 'The ceiling slab slams down', 's.state==="dead"', 2, 'the cave ceiling slams down'],
+    [5, 'Left and right swap', 'troll:Left and right swap', 22, 'left and right swap'],
+    [6, 'win', 's.gravity<0', 24, 'gravity flips'],
+    [7, 'win', 'troll:The EXIT grows legs', 34, 'the EXIT grows legs and runs away'],
+    [8, 'win', 'troll:The screen turns upside down', 40, 'the screen turns upside down'],
+    [9, 'win', 'troll:A spike wall chases you', 40, 'a spike wall chases you'],
+    [10, 'The elevator rises into ceiling spikes', 'troll:The elevator rises', 40, 'the elevator rises into ceiling spikes'],
   ];
   const lv = await openGame(browser, url, PHONE);
   await lv.page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.setManual(true); });
@@ -97,6 +107,14 @@ if (!args.has('--video-only')) {
     const file = `level-${String(lvl).padStart(2, '0')}.png`;
     await lv.page.screenshot({ path: join(SHOTS, file), timeout: 180000 });
     console.log(`screens/${file}  ${caption}`);
+  }
+  // the hint button (one per level): hint shown + the next trap highlighted
+  {
+    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', 'level-04.json'), 'utf8'));
+    await advance(lv.page, 4, R.win, 's.x>=380', 0, 16);
+    await lv.page.evaluate(() => { window.__DTTD.hint(); window.__DTTD.step(24); });
+    await lv.page.screenshot({ path: join(SHOTS, 'hint-button.png'), timeout: 180000 });
+    console.log('screens/hint-button.png  the one-per-level hint');
   }
   // the checkpoint flag
   {
@@ -111,8 +129,8 @@ if (!args.has('--video-only')) {
   const dk = await openGame(browser, url, { context: { deviceScaleFactor: 1 } });
   await dk.page.evaluate(() => window.__DTTD.setManual(true));
   {
-    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', 'level-10.json'), 'utf8'));
-    await advance(dk.page, 10, R.cp, 's.gravity<0', 30, 16, true);
+    const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', 'level-09.json'), 'utf8'));
+    await advance(dk.page, 9, R.win, 's.x>=2400', 0, 16);
     await dk.page.screenshot({ path: join(SHOTS, 'desktop-1280x720.png'), timeout: 180000 });
   }
   await dk.ctx.close();
@@ -124,14 +142,14 @@ if (!args.has('--screens-only')) {
   const FPS = 30;
   const W = 1080, H = 1920, GAME = 1080; // square crop of a 1920×1080 render
   const clips = [
-    { lvl: 3, rec: 'win', from: 's.x>=752', dur: 2.4, cap: 'The EXIT door…|…has LEGS?!' },
-    { lvl: 2, rec: 0, from: 's.x>=370', dur: 1.7, cap: 'The floor lied.' },
-    { lvl: 4, rec: 0, from: 's.x>=225', dur: 1.7, cap: 'Spikes pop where you land' },
-    { lvl: 6, rec: 0, from: 's.x>=340', dur: 1.7, cap: 'Jump pad = bad idea' },
-    { lvl: 7, rec: 0, from: 's.x>=940', dur: 1.5, cap: 'Wrong door.' },
-    { lvl: 8, rec: 0, from: 's.x>=480', dur: 1.9, cap: 'Gravity? Optional.' },
-    { lvl: 9, rec: 0, from: 's.x>=232', dur: 1.3, cap: 'Greedy?' },
-    { lvl: 10, rec: 'win', from: 's.levelTick>=8', dur: 4.7, cap: 'FINALE: everything lies' },
+    { lvl: 7, rec: 'win', from: 'near:The EXIT grows legs', dur: 2.6, cap: 'The EXIT door…|…has LEGS?!' },
+    { lvl: 1, rec: 'Two fake floor', from: 'near:Two fake floor', dur: 1.7, cap: 'The floor lied.' },
+    { lvl: 2, rec: 'The coin arc', from: 'near:The coin arc', dur: 1.8, cap: 'Greedy?' },
+    { lvl: 3, rec: 'A sideways spring', from: 'near:A sideways spring', dur: 1.8, cap: 'Spring = bad idea' },
+    { lvl: 5, rec: 'Left and right swap', from: 'near:Left and right swap', dur: 2.0, cap: 'Left is… right?!' },
+    { lvl: 6, rec: 'win', from: 'near:Gravity flips –', dur: 2.0, cap: 'Gravity? Optional.' },
+    { lvl: 8, rec: 'win', from: 'near:The screen turns upside down', dur: 2.2, cap: 'Even the screen lies' },
+    { lvl: 9, rec: 'win', from: 'near:A spike wall chases you', dur: 3.4, cap: 'RUN!' },
   ];
   const END = 3.1; // end card (last 0.5 s cross-fades back to frame 0 for a seamless loop)
 
@@ -143,17 +161,18 @@ if (!args.has('--screens-only')) {
   let camX = null;
   for (let ci = 0; ci < clips.length; ci++) {
     const c = clips[ci];
-    await advance(page, c.lvl, pick(c.lvl, c.rec), c.from, 0);
+    const pk = pick(c.lvl, c.rec);
+    await advance(page, c.lvl, pk.rec, c.from, 0, 30, pk.cp);
     const startStep = await page.evaluate(() => window.__DTTD.frame());
     const t0 = vf / FPS;
     camX = null;
     const n = Math.round(c.dur * FPS);
     for (let i = 0; i < n; i++) {
       const s = await page.evaluate(() => { window.__DTTD.step(2); return window.__DTTD.state(); });
-      // follow the action horizontally (world → screen ×1.5), smoothed and clamped
-      const focus = c.lvl === 3 || c.lvl === 10 ? (s.x + s.doorX) / 2 : s.x;
-      const want = Math.max(0, Math.min(1920 - GAME, focus * 1.5 - GAME / 2));
-      camX = camX === null ? want : camX + (want - camX) * 0.18;
+      // the game camera already follows the hero: take the square around the screen centre,
+      // shifted a little toward the running direction
+      const want = (1920 - GAME) / 2 + Math.max(-160, Math.min(160, s.vx * 0.25));
+      camX = camX === null ? want : camX + (want - camX) * 0.12;
       await page.screenshot({ timeout: 180000, path: join(TMP, 'frames', `g${String(vf).padStart(4, '0')}.png`), clip: { x: Math.round(camX), y: 0, width: GAME, height: GAME } });
       meta.push(ci);
       vf++;

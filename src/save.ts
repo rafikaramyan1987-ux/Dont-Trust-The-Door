@@ -9,10 +9,12 @@ export interface SaveData {
   levelDeaths: Record<string, number>; // deaths per level id (all-time)
   completed: Record<string, boolean>;
   muted: boolean;
+  /** The level-1 control instructions have been shown. */
+  tutorialSeen: boolean;
 }
 
 function fresh(): SaveData {
-  return { unlocked: 1, totalDeaths: 0, levelDeaths: {}, completed: {}, muted: false };
+  return { unlocked: 1, totalDeaths: 0, levelDeaths: {}, completed: {}, muted: false, tutorialSeen: false };
 }
 
 let data: SaveData = load();
@@ -29,6 +31,7 @@ function load(): SaveData {
       levelDeaths: typeof parsed.levelDeaths === 'object' && parsed.levelDeaths ? parsed.levelDeaths : base.levelDeaths,
       completed: typeof parsed.completed === 'object' && parsed.completed ? parsed.completed : base.completed,
       muted: !!parsed.muted,
+      tutorialSeen: !!parsed.tutorialSeen,
     };
   } catch {
     return fresh();
@@ -56,6 +59,11 @@ export const Save = {
   complete(levelId: number, levelCount: number): void {
     data.completed[String(levelId)] = true;
     data.unlocked = Math.min(levelCount, Math.max(data.unlocked, levelId + 1));
+    persist();
+  },
+  setTutorialSeen(): void {
+    if (data.tutorialSeen) return;
+    data.tutorialSeen = true;
     persist();
   },
   setMuted(m: boolean): void {

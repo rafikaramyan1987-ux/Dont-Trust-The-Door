@@ -11,9 +11,9 @@
     "test:levels": "node tests/validate-levels.mjs",
     "test:bot": "node tests/run-selftest.mjs",
     "test": "npm run test:levels && npm run build && npm run test:bot",
-    "record": "node tests/author-replays.mjs",
+    "record": "npm run levels && vite build && node tests/author-replays.mjs",
     "media": "node tools/capture-media.mjs --screens-only",
-    "levels": "node tools/level-builder/build.mjs"
+    "levels": "node tools/level-builder/build.mjs && node tests/validate-levels.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
