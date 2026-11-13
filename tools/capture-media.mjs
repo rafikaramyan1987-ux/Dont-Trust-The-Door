@@ -19,8 +19,8 @@ const R = (l) => JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-$
 const pick = (l, which) => {
   if (which === 'win') return { rec: R(l).win, cp: false };
   const k = Object.keys(R(l).traps).find((n) => n.startsWith(which));
-  if (!k) throw new Error(`level ${l}: no trap replay "${which}"`);
-  return R(l).traps[k];
+  if (!k) throw new Error(`level ${l}: no trap "${which}"`);
+  return { rec: R(l).traps[k].die, cp: R(l).traps[k].cp };
 };
 
 const { server, url } = await serveDist();
@@ -82,27 +82,40 @@ if (!args.has('--video-only')) {
   await page.evaluate(() => window.__DTTD.scene('Select'));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(SHOTS, '00-level-select.png') });
+  // the language selector (title screen)
+  await page.evaluate(() => window.__DTTD.scene('Title'));
+  await page.waitForTimeout(600);
+  await page.evaluate(() => { const b = window.__DTTD.game.scene.getScene('Title').children.list.find((o) => o.name === 'language'); b.emit('pointerdown'); b.emit('pointerup'); });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(SHOTS, '00-language-selector.png') });
+  // the title screen in Russian and Turkish
+  for (const l of ['ru', 'tr']) {
+    await page.evaluate((l) => { window.__DTTD.lang(l); window.__DTTD.scene('Title'); }, l);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: join(SHOTS, `00-title-${l}.png`) });
+  }
+  await page.evaluate(() => window.__DTTD.lang('en'));
   if (errors.length) console.log('console errors:', errors);
   await ctx.close();
 
   // [level, replay ('win' or trap name prefix), until, extra frames, caption]
   const moments = [
-    [1, 'The bridge crumbles behind you', 'troll:The bridge crumbles', 30, 'the bridge crumbles behind you'],
-    [2, 'The coin arc over the pit bites', 's.state==="dead"', 3, 'that coin had teeth'],
-    [3, 'A sideways spring flings you', 'troll:A sideways spring', 14, 'a sideways spring flings you into spikes'],
-    [4, 'The ceiling slab slams down', 's.state==="dead"', 2, 'the cave ceiling slams down'],
-    [5, 'Left and right swap', 'troll:Left and right swap', 22, 'left and right swap'],
-    [6, 'win', 's.gravity<0', 24, 'gravity flips'],
+    [1, 'The conveyor belt', 'troll:The conveyor belt', 30, 'a conveyor belt drags you back into the pit'],
+    [2, 'Spiky coins rain', 'troll:Spiky coins rain', 22, 'spiky coins rain from the sky'],
+    [3, 'win', 'troll:The spring bounces higher', 70, 'the spring bounces you higher every time'],
+    [4, 'win', 'troll:The whole roof slab', 72, 'the whole roof crashes down – hide in the slot'],
+    [5, 'win', 'troll:You get the hiccups', 40, 'you get the hiccups'],
+    [6, 'win', 'troll:A bubble makes you float', 40, 'an anti-gravity bubble'],
     [7, 'win', 'troll:The EXIT grows legs', 34, 'the EXIT grows legs and runs away'],
-    [8, 'win', 'troll:The screen turns upside down', 40, 'the screen turns upside down'],
-    [9, 'win', 'troll:A spike wall chases you', 40, 'a spike wall chases you'],
-    [10, 'The elevator rises into ceiling spikes', 'troll:The elevator rises', 40, 'the elevator rises into ceiling spikes'],
+    [8, 'win', 'troll:The lights go out', 40, 'the lights go out'],
+    [9, 'win', 'troll:A storm cloud strikes', 84, 'a storm cloud strikes where you stand'],
+    [10, 'win', 'troll:The ferris wheel', 90, 'ride the ferris wheel – but not too far'],
   ];
   const lv = await openGame(browser, url, PHONE);
   await lv.page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.setManual(true); });
   for (const [lvl, which, until, extra, caption] of moments) {
     const R = JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-${String(lvl).padStart(2, '0')}.json`), 'utf8'));
-    const t = which === 'win' ? { rec: R.win, cp: false } : R.traps[Object.keys(R.traps).find((k) => k.startsWith(which))];
+    const t = pick(lvl, which);
     await advance(lv.page, lvl, t.rec, until, extra, 16, t.cp);
     const file = `level-${String(lvl).padStart(2, '0')}.png`;
     await lv.page.screenshot({ path: join(SHOTS, file), timeout: 180000 });
@@ -143,13 +156,13 @@ if (!args.has('--screens-only')) {
   const W = 1080, H = 1920, GAME = 1080; // square crop of a 1920×1080 render
   const clips = [
     { lvl: 7, rec: 'win', from: 'near:The EXIT grows legs', dur: 2.6, cap: 'The EXIT door…|…has LEGS?!' },
-    { lvl: 1, rec: 'Two fake floor', from: 'near:Two fake floor', dur: 1.7, cap: 'The floor lied.' },
-    { lvl: 2, rec: 'The coin arc', from: 'near:The coin arc', dur: 1.8, cap: 'Greedy?' },
-    { lvl: 3, rec: 'A sideways spring', from: 'near:A sideways spring', dur: 1.8, cap: 'Spring = bad idea' },
-    { lvl: 5, rec: 'Left and right swap', from: 'near:Left and right swap', dur: 2.0, cap: 'Left is… right?!' },
-    { lvl: 6, rec: 'win', from: 'near:Gravity flips –', dur: 2.0, cap: 'Gravity? Optional.' },
+    { lvl: 1, rec: 'The conveyor belt', from: 'near:The conveyor belt', dur: 1.9, cap: 'The floor lied.' },
+    { lvl: 2, rec: 'Spiky coins rain', from: 'near:Spiky coins rain', dur: 2.0, cap: 'Greedy?' },
+    { lvl: 4, rec: 'win', from: 'near:The whole roof slab', dur: 2.6, cap: 'Hide!' },
+    { lvl: 5, rec: 'win', from: 'near:You get the hiccups', dur: 2.2, cap: 'Hic!' },
+    { lvl: 6, rec: 'win', from: 'near:A bubble makes you float', dur: 2.0, cap: 'Gravity? Optional.' },
     { lvl: 8, rec: 'win', from: 'near:The screen turns upside down', dur: 2.2, cap: 'Even the screen lies' },
-    { lvl: 9, rec: 'win', from: 'near:A spike wall chases you', dur: 3.4, cap: 'RUN!' },
+    { lvl: 9, rec: 'win', from: 'near:A storm cloud strikes', dur: 3.0, cap: 'RUN!' },
   ];
   const END = 3.1; // end card (last 0.5 s cross-fades back to frame 0 for a seamless loop)
 

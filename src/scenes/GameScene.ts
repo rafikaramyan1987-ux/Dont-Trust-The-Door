@@ -1478,6 +1478,22 @@ export class GameScene extends Phaser.Scene {
     const next = (this.lvl.trolls ?? []).filter((tr) => tr.x + tr.w > hx - 0.5).sort((a, b) => a.x - b.x)[0];
     const text = t(next ? next.hint : 'hint.none');
     this.hintShown = { id: next ? next.id : '', text };
+    const c = this.showHintBox(text);
+    this.tweens.add({ targets: c, alpha: 0, delay: 4200, duration: 400, onComplete: () => { c.destroy(); if (this.hintBox === c) this.hintBox = null; } });
+    if (next) {
+      // highlight exactly the dangerous tiles
+      for (const [x, y, ww, hh] of next.danger) {
+        const hl = this.track(this.add.rectangle(x * TILE, y * TILE, ww * TILE, hh * TILE, 0xffd23f, 0.3).setOrigin(0).setDepth(20));
+        hl.setStrokeStyle(5, 0xffd23f, 0.95);
+        hl.setName('highlight');
+        this.tweens.add({ targets: hl, alpha: 0.25, duration: 300, yoyo: true, repeat: 6, onComplete: () => hl.setVisible(false) });
+      }
+    }
+    this.sfx('coin');
+  }
+
+  /** The hint box: wraps the text to the visible width (phones) and returns the container. */
+  showHintBox(text: string): Phaser.GameObjects.Container {
     this.hintBox?.destroy();
     const c = this.add.container(WORLD_W / 2, 150).setDepth(150);
     const box = this.hintBoxMaxW();
@@ -1495,20 +1511,12 @@ export class GameScene extends Phaser.Scene {
     c.setName('hintbox');
     c.setData('w', w);
     this.uiLayer.add(c);
+    c.setData('h', h);
+    c.setData('maxW', box);
     this.hintBox = c;
     c.setScale(0.3);
     this.tweens.add({ targets: c, scale: 1, duration: 180, ease: 'Back.Out' });
-    this.tweens.add({ targets: c, alpha: 0, delay: 4200, duration: 400, onComplete: () => { c.destroy(); if (this.hintBox === c) this.hintBox = null; } });
-    if (next) {
-      // highlight exactly the dangerous tiles
-      for (const [x, y, ww, hh] of next.danger) {
-        const hl = this.track(this.add.rectangle(x * TILE, y * TILE, ww * TILE, hh * TILE, 0xffd23f, 0.3).setOrigin(0).setDepth(20));
-        hl.setStrokeStyle(5, 0xffd23f, 0.95);
-        hl.setName('highlight');
-        this.tweens.add({ targets: hl, alpha: 0.25, duration: 300, yoyo: true, repeat: 6, onComplete: () => hl.setVisible(false) });
-      }
-    }
-    this.sfx('coin');
+    return c;
   }
 
   /** Is there solid ground anywhere above the hero (shelter from lightning)? */
@@ -2211,6 +2219,11 @@ export class GameScene extends Phaser.Scene {
   /** Test hook: press the hint button. */
   debugHint(): void {
     this.useHint();
+  }
+
+  /** Test hook: win right now (to show the level-complete card). */
+  debugWin(): void {
+    this.win();
   }
 
   /** Test hook: kill the hero right now (used to check checkpoint respawns). */

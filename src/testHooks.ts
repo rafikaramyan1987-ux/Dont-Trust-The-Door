@@ -12,7 +12,7 @@ import { Hero } from './game/Hero';
 import { label } from './ui';
 import { applyLayout } from './layout';
 import { RES, makeExitSign } from './art';
-import { setLang, getLang } from './i18n';
+import { setLang, getLang, t } from './i18n';
 
 /** Test/marketing only: the hero's four expressions side by side. */
 class ShowcaseScene extends Phaser.Scene {
@@ -111,6 +111,8 @@ export function installTestHooks(game: Phaser.Game): void {
     kill() { scene().debugKill(); },
     snapCamera() { scene().debugSnapCamera(); },
     hint() { scene().debugHint(); },
+    levelData(id: number) { return LEVELS[id - 1]; },
+    t,
     /** Switch language (as the picker does) and return the code in use. */
     lang(code?: string) { if (code) { Save.setLang(code); setLang(code); makeExitSign(game.scene.getScene('Boot')); } return getLang(); },
     restart() { scene().restartLevel(); },
