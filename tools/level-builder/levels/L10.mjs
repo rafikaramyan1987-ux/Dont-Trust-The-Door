@@ -179,7 +179,7 @@ function pulleyPlatforms(b) {
   const X = b.px(0);
   return {
     w: 21,
-    win: [run(X + 5 * T + 20), ['', `s.g.${c}[1] <= -40`], run(X + 7 * T - 24), J(), land, run(X + 13 * T - 24), J(), land, run(X + 20 * T)],
+    win: [run(X + 5 * T + 20), ["", `s.g.${c}[1] <= -24`], run(X + 7 * T - 8), J(), land, run(X + 13 * T - 24), J(), land, run(X + 20 * T)],
     die: [run(X + 5 * T + 20), ['', 300]],
   };
 }

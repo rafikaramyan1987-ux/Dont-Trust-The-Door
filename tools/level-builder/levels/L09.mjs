@@ -142,17 +142,17 @@ function stormCloud(b) {
 /** TRAP floor-eater: the thin bridge is eaten away behind you faster than you run – hop the pillars. */
 function floorEater(b) {
   b.ground(0, 1);
-  b.fill(2, 21, 17, 17, '^');
+  b.fill(2, 24, 17, 17, '^');
   const br = b.group({ tile: '#', columns: true });
-  for (const [a, z] of [[2, 6], [8, 11], [13, 16], [18, 21]]) b.fill(a, z, 15, 15, br);
-  for (const x of [7, 12, 17]) b.fill(x, x, 13, 17, '#');
-  b.ground(22, 27);
-  const id = b.troll('The floor is eaten away behind you', { type: 'floor-eater', hint: 'Something eats the thin bridge behind you faster than you can run – get up on the stone pillars and hop from pillar to pillar.', hazards: [[2, 17, 20, 1]] });
+  for (const [a, z] of [[2, 6], [10, 12], [16, 18], [22, 24]]) b.fill(a, z, 15, 15, br);
+  for (const x of [7, 13, 19]) b.fill(x, x + 2, 13, 17, '#');
+  b.ground(25, 30);
+  const id = b.troll('The floor is eaten away behind you', { type: 'floor-eater', hint: 'Something eats the thin bridge behind you faster than you can run – get up on the stone pillars and hop from pillar to pillar.', hazards: [[2, 17, 23, 1]] });
   b.trigger({ when: { zone: b.rect(3, 9, 1, 6) }, do: [{ eat: br, speed: 6 }, { say: 'say.run', at: 'hero', ticks: 40 }], troll: id });
   const X = b.px(0);
   return {
-    w: 28,
-    win: [run(X + 5 * T + 10), J(), land, run(X + 7 * T + 34), J(), land, run(X + 12 * T + 34), J(), land, run(X + 17 * T + 34), J(), land, run(X + 27 * T)],
+    w: 31,
+    win: [run(X + 5 * T + 20), J(8), land, run(X + 10 * T - 24), J(), land, run(X + 16 * T - 24), J(), land, run(X + 22 * T - 24), J(), land, run(X + 30 * T)],
     die: [run(X + 6 * T), ['R', 120]],
   };
 }
