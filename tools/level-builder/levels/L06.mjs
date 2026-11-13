@@ -6,7 +6,7 @@ function gravityFlip(b) {
   b.ground(0, 14);
   b.fill(2, 13, 3, 3, '#');
   b.fill(6, 8, 4, 4, 'v');
-  const id = b.troll('Gravity flips – drifting lands you in ceiling spikes', { type: 'gravity-flip', hint: 'Gravity flips at the arrow and you fall up – let go of the keys so you land before the ceiling spikes, then jump over them.', hazards: [[6, 4, 3, 1]] });
+  const id = b.troll('Gravity flips – drifting lands you in ceiling spikes', { type: 'gravity-flip', hint: 'Gravity suddenly flips and you fall up – let go of the keys so you land before the ceiling spikes, then jump over them.', hazards: [[6, 4, 3, 1]] });
   b.trigger({ when: { zone: b.rect(2, 5, 1, 10) }, do: [{ gravity: 'flip' }], troll: id });
   const X = b.px(0);
   return {

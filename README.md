@@ -132,7 +132,7 @@ the solution the bot uses to pass it.
 
 243 tiles wide (was 121, ×2.01) · 8 traps · checkpoint after every 3 traps · bot win 32.6 s
 
-1. **Gravity flips – drifting lands you in ceiling spikes** (`gravity-flip`) – Gravity flips at the arrow and you fall up – let go of the keys so you land before the ceiling spikes, then jump over them.
+1. **Gravity flips – drifting lands you in ceiling spikes** (`gravity-flip`) – Gravity suddenly flips and you fall up – let go of the keys so you land before the ceiling spikes, then jump over them.
 2. **Gravity flips back above a spike field** (`gravity-flip-back`) – At the end of the ceiling walk gravity flips back above spikes – keep holding RIGHT while you fall.
 3. **Floaty gravity – a jump hits the spikes** (`low-gravity`) – Gravity is weak at the end of the top step – do not jump (you would hit the spikes); just walk off the edge and float across.
    - 🚩 *checkpoint*
