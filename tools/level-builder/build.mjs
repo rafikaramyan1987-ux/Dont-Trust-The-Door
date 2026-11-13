@@ -15,12 +15,14 @@ import { writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { start, checkpoint, end, connector } from './lib.mjs';
+import { dangerTiles } from './danger.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROWS = 18;
+/** Shifts every connector's random seed (picked so that no terrain pattern repeats). */
+const SALT = Number(process.env.DTTD_SALT ?? 7);
 // group ids: a-z (not o, v), A-Z (not P, D, F, C, H), 0-9
 const IDS = [...'abcdefghijklmnpqrstuwxyz', ...'ABEGIJKLMNOQRSTUVWXYZ', ...'0123456789'];
-const ACTION_GROUP_KEYS = ['fall', 'pop', 'retract', 'move', 'chase', 'show', 'hide', 'toss', 'eat', 'activate'];
 
 class Builder {
   constructor(id, labels) {
@@ -104,12 +106,12 @@ function layout(spec, fillers) {
   const items = [[start, { tutorial: spec.id === 1, style }]];
   spec.traps.forEach((tr, i) => {
     const f = fillers[i];
-    if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i, style }]);
+    if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i + SALT, style }]);
     items.push(Array.isArray(tr) ? tr : [tr, {}]);
     if ((i + 1) % 3 === 0 && i + 1 < spec.traps.length) items.push([checkpoint, { style }]);
   });
   const f = fillers[spec.traps.length];
-  if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99, style }]);
+  if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99 + SALT, style }]);
   items.push([spec.endSeg ?? end, { style }, 'end']);
   return items;
 }
@@ -156,27 +158,6 @@ function rectsOfTiles(tiles) {
   return out;
 }
 
-/** The dangerous tiles of a troll: its triggers' zones, touched groups, groups its actions
- *  move/drop/pop, groups that credit it, plus explicit hazards. (Same rule as the validator.) */
-export function dangerTiles(level, troll) {
-  const tiles = [];
-  const groupTiles = (g) => {
-    level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === g) tiles.push([x, y]); }));
-    for (const c of level.groups?.[g]?.cover ?? []) tiles.push(c);
-  };
-  const rect = ([x, y, w, h]) => { for (let j = Math.floor(y); j < Math.ceil(y + h); j++) for (let i = Math.floor(x); i < Math.ceil(x + w); i++) tiles.push([i, j]); };
-  for (const t of level.triggers ?? []) {
-    if (t.troll !== troll.id) continue;
-    if (t.when.zone) rect(t.when.zone);
-    if (t.when.touch) groupTiles(t.when.touch);
-    for (const a of t.do) for (const k of ACTION_GROUP_KEYS) if (k in a) groupTiles(a[k]);
-  }
-  for (const [g, d] of Object.entries(level.groups ?? {})) if (d.troll === troll.id) groupTiles(g);
-  for (const [x, id] of Object.entries(level.fakeExits ?? {})) if (id === troll.id) { level.map.forEach((row, y) => { if (row[x] === 'F') tiles.push([Number(x), y], [Number(x), y - 1]); }); }
-  for (const h of troll.hazards ?? []) rect(h);
-  return tiles.filter(([x, y]) => y >= 0 && y < ROWS && x >= 0);
-}
-
 function compile(spec, fillers) {
   const items = layout(spec, fillers);
   // two passes so segments can refer to positions of later segments (door destinations)
@@ -206,7 +187,7 @@ function compile(spec, fillers) {
     t.w = Math.max(...tiles.map(([x]) => x)) - t.x + 1;
     const seg = segs.find((s) => s.troll === t.id);
     t.solution = seg.win;
-    delete t.hazards;
+    if (!t.hazards.length) delete t.hazards;
   }
   // plans
   const cpIdx = segs.map((s, i) => (s.fn === 'checkpoint' ? i : -1)).filter((i) => i >= 0);

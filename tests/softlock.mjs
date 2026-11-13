@@ -13,9 +13,16 @@
 // It is run on several world states: the initial map, the map after every trap has
 // fired, and each trap fired on its own (floors gone, platforms moved, spikes out, …).
 // Heavy-gravity regions allow no climbing; "broken jump" regions allow no jumping.
+// Newer mechanics: zone effects that hold while you are inside (turbo / super jump widen
+// the reachable area; floating bubbles act as upward gravity; "jump flips gravity" lets you
+// fall to the ceiling and back), platforms on orbits, followers and pulleys (sampled
+// positions), teleporting platforms (cumulative moves), portal doors (an edge to their
+// exit) and kicking doors (a wall). Moves that return on their own are transient and add no
+// world state.
 
 const ROWS = 18;
 const SOLID = '#';
+const isGroup = (ch) => (ch >= 'a' && ch <= 'z' && ch !== 'o' && ch !== 'v') || (ch >= 'A' && ch <= 'Z' && !'PDFCH'.includes(ch)) || (ch >= '0' && ch <= '9');
 const SPIKES = new Set(['^', 'v', '<', '>', '*']);
 
 const MOVES = {
@@ -28,10 +35,23 @@ const MOVES = {
 function regions(level, W) {
   // per-column modifiers derived from set/reset trigger pairs, ordered by x
   const grav = new Array(W).fill(1), heavy = new Array(W).fill(false), nojump = new Array(W).fill(false);
+  const flipjump = new Array(W).fill(false), boost = new Array(W).fill(false);
   const evs = [];
   for (const t of level.triggers || []) {
     const z = t.when.zone;
     if (!z) continue;
+    if (t.hold) {
+      // zone effects hold exactly over the zone's columns
+      for (let c = Math.max(0, Math.floor(z[0])); c < Math.min(W, Math.ceil(z[0] + z[2])); c++) for (const a of t.do) {
+        if ('gravityScale' in a && a.gravityScale > 1) heavy[c] = true;
+        if ('gravityScale' in a && a.gravityScale < 0) grav[c] = -1;
+        if ('controls' in a && a.controls === 'nojump') nojump[c] = true;
+        if ('controls' in a && a.controls === 'flipjump') { flipjump[c] = true; nojump[c] = true; }
+        if ('controls' in a && (a.controls === 'turbo' || a.controls === 'superjump')) boost[c] = true;
+      }
+      continue;
+    }
+    if (t.every) continue; // rhythmic flips (gravity pulse) come back on their own
     for (const a of t.do) {
       if ('gravity' in a) evs.push({ x: z[0], kind: 'grav', on: a.gravity === 'flip' });
       if ('gravityScale' in a) evs.push({ x: z[0], kind: 'heavy', on: a.gravityScale > 1 });
@@ -49,27 +69,46 @@ function regions(level, W) {
       if (i < list.length) { on = list[i].on; last = Math.max(0, x); }
     }
   }
-  return { grav, heavy, nojump };
+  return { grav, heavy, nojump, flipjump, boost };
 }
 
 /** Group tiles and the alternative configurations their triggers can put them in. */
 function groupStates(level) {
   const groups = {};
   level.map.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch >= 'a' && ch <= 'z' && level.groups?.[ch]) (groups[ch] ??= []).push([x, y]);
+    if (isGroup(ch) && level.groups?.[ch]) (groups[ch] ??= []).push([x, y]);
   }));
   for (const [g, d] of Object.entries(level.groups || {})) for (const c of d.cover || []) (groups[g] ??= []).push(c);
   const alts = {}; // group -> list of {dx, dy, present}
+  const add = (g, v) => (alts[g] ??= []).push(v);
+  const at = {}; // cumulative offset of each group (teleporting platforms move step by step)
   for (const t of level.triggers || []) for (const a of t.do) {
-    const add = (g, v) => (alts[g] ??= []).push(v);
     if ('fall' in a) add(a.fall, { dx: 0, dy: 0, present: false });
     if ('hide' in a) add(a.hide, { dx: 0, dy: 0, present: false });
     if ('show' in a) add(a.show, { dx: 0, dy: 0, present: true });
     if ('pop' in a) add(a.pop, { dx: 0, dy: 0, present: true });
-    if ('move' in a) for (const f of [0.25, 0.5, 0.75, 1]) add(a.move, { dx: a.by[0] * f, dy: a.by[1] * f, present: true });
+    if ('eat' in a || 'toss' in a) add(a.eat ?? a.toss, { dx: 0, dy: 0, present: false });
+    if ('activate' in a) add(a.activate, { dx: 0, dy: 0, present: false });
+    if ('move' in a) {
+      if (a.returnAfter !== undefined) continue; // comes back by itself: transient
+      const [x0, y0] = at[a.move] ?? [0, 0];
+      for (const f of [0.25, 0.5, 0.75, 1]) add(a.move, { dx: x0 + a.by[0] * f, dy: y0 + a.by[1] * f, present: true });
+      at[a.move] = [x0 + a.by[0], y0 + a.by[1]];
+    }
     if ('chase' in a) {
       const n = a.untilX !== undefined ? a.untilX : 0, m = a.untilY !== undefined ? a.untilY : 0;
-      add(a.chase, { dx: n, dy: m, present: true });
+      for (const f of [0.5, 1]) add(a.chase, { dx: n * f, dy: m * f, present: true });
+    }
+  }
+  // platforms that move by themselves
+  for (const [g, d] of Object.entries(level.groups || {})) {
+    if (d.orbit) for (let k = 0; k < 8; k++) {
+      const ph = d.orbit.phase ?? 0, a = ph + (k * Math.PI) / 4;
+      add(g, { dx: d.orbit.r * (Math.cos(a) - Math.cos(ph)), dy: d.orbit.r * (Math.sin(a) - Math.sin(ph)), present: true });
+    }
+    if (d.follow) for (let v = d.follow.min; v <= d.follow.max; v += 1) add(g, { dx: v, dy: 0, present: true });
+    if (d.pulley) for (let v = -d.pulley.range; v <= d.pulley.range; v += 0.5) {
+      add(g, { dx: 0, dy: v, present: true, with: { [d.pulley.partner]: { dx: 0, dy: -v, present: true } } });
     }
   }
   return { groups, alts };
@@ -78,6 +117,7 @@ function groupStates(level) {
 function buildGrid(level, W, groups, cfg) {
   // cfg: group -> {dx, dy, present}
   const pads = [];
+  const grid = { warps: [] };
   const solid = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   const deadly = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   level.map.forEach((row, y) => [...row].forEach((ch, x) => {
@@ -89,19 +129,20 @@ function buildGrid(level, W, groups, cfg) {
     const d = level.groups[g];
     const c = cfg[g] ?? { dx: 0, dy: 0, present: !d.hidden };
     if (!c.present) continue;
-    const isBlock = d.tile === '#' && !d.fake;
-    const isDeadly = (SPIKES.has(d.tile) && !d.fake) || d.trapCoin || d.tile === 'F';
+    const isBlock = (d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick);
+    const isDeadly = (SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop);
     for (const [x0, y0] of cells) {
       const x = x0 + Math.round(c.dx), y = y0 + Math.round(c.dy);
       if (x < 0 || x >= W || y < 0 || y >= ROWS) continue;
-      if (isBlock) solid[y][x] = true;
+      if (isBlock) { solid[y][x] = true; if (d.tile === 'F' && y > 0) solid[y - 1][x] = true; }
+      if (d.tile === 'F' && d.warp) grid.warps.push({ x, y, to: d.warp });
       if (isDeadly) deadly[y][x] = true;
       if (d.tile === '=' && !d.dud) pads.push({ x, y, side: d.launch ? d.launch[0] : 0 });
     }
   }
   // fake EXITs bite
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'F') { deadly[y][x] = true; if (y > 0) deadly[y - 1][x] = true; } }));
-  return { solid, deadly, pads };
+  return { solid, deadly, pads, warps: grid.warps };
 }
 
 /** Movement helpers for one world state. */
@@ -111,16 +152,18 @@ function makeState(level, W, grid, reg) {
   const free = (x, y) => x >= 0 && x < W && (y < 0 || y >= ROWS || !solid[y][x]);
   const D = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < W && deadly[y][x];
   const g = (x) => reg.grav[Math.max(0, Math.min(W - 1, x))];
-  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && S(x, y + g(x));
+  // under the ceiling in a "jump flips gravity" strip you can stand upside down
+  const onCeil = (x, y) => reg.flipjump[Math.max(0, Math.min(W - 1, x))] && g(x) > 0 && S(x, y - 1) && !S(x, y + 1);
+  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y));
   const key = (x, y) => y * 1000 + x;
 
   // falling from (x, y) with the column's gravity (optionally drifting sideways)
-  function fall(x, y, drift) {
+  function fall(x, y, drift, gOverride) {
     const res = [];
     const cols = drift ? Array.from({ length: drift * 2 + 1 }, (_, i) => x - drift + i) : [x];
     for (const cx of cols) {
       if (cx < 0 || cx >= W) continue;
-      const gg = g(cx);
+      const gg = gOverride ?? g(cx);
       let cy = y;
       for (let n = 0; n < 40; n++) {
         if (!free(cx, cy)) break;
@@ -139,6 +182,17 @@ function makeState(level, W, grid, reg) {
     const M = MOVES[model];
     const out = [];
     const gg = g(x);
+    if (onCeil(x, y)) {
+      // walking upside down along the ceiling, or flipping back down
+      for (const dx of [-1, 1]) {
+        const nx = x + dx;
+        if (!free(nx, y)) continue;
+        if (D(nx, y)) { out.push(DEATH); continue; }
+        out.push(...(S(nx, y - 1) ? [key(nx, y)] : fall(nx, y, 0, -1)));
+      }
+      out.push(...fall(x, y, model === 'reach' ? 4 : 0, 1));
+      return out;
+    }
     for (const dx of [-1, 1]) {
       const nx = x + dx;
       if (!free(nx, y)) continue;
@@ -146,13 +200,18 @@ function makeState(level, W, grid, reg) {
       if (stand(nx, y)) out.push(key(nx, y));
       else out.push(...fall(nx, y, model === 'reach' ? M.drift : 0));
     }
+    // "jump flips gravity": fall to the other side (ceiling ↔ floor), drifting while you run
+    if (reg.flipjump[x]) out.push(...fall(x, y, model === 'reach' ? 4 : 0, -gg));
+    // portal doors: step in, come out at the exit
+    for (const w of grid.warps) if (w.x === x && (w.y === y || w.y === y + 1)) { const [tx, ty] = w.to; out.push(stand(tx, ty) ? key(tx, ty) : DEATH, ...fall(tx, ty, model === 'reach' ? 4 : 0)); }
     if (reg.nojump[x]) return out;
     const heavy = reg.heavy[x];
-    const maxUp = heavy ? 0 : M.up;
+    const boost = model === 'reach' && reg.boost[x];
+    const maxUp = heavy ? 0 : boost ? 5 : M.up;
     if (!free(x, y - gg)) return out; // no head room to jump
     for (let dyAbs = -maxUp; dyAbs <= 8; dyAbs++) {
       const dy = dyAbs * gg; // screen rows (negative = up under normal gravity)
-      const reach = heavy ? 2 : M.reach(dyAbs);
+      const reach = heavy ? 2 : boost ? 10 : M.reach(dyAbs);
       for (let dx = -reach; dx <= reach; dx++) {
         if (dx === 0 && dyAbs >= 0) continue;
         const tx = x + dx, ty = y + dy;
@@ -227,7 +286,7 @@ export function analyzeLevel(level) {
   const all = {};
   for (const [gname, list] of Object.entries(alts)) {
     all[gname] = list[list.length - 1];
-    list.forEach((v, i) => configs.push({ name: `${gname}#${i}`, cfg: { [gname]: v } }));
+    list.forEach((v, i) => configs.push({ name: `${gname}#${i}`, cfg: { [gname]: v, ...(v.with ?? {}) } }));
   }
   configs.push({ name: 'all traps fired', cfg: all });
   const states = configs.map((c) => ({ ...c, h: makeState(level, W, buildGrid(level, W, groups, c.cfg), reg) }));

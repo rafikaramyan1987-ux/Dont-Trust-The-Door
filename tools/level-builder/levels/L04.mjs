@@ -102,9 +102,9 @@ function fakeCeiling(b) {
 function safeNotch(b) {
   b.ground(0, 17);
   b.fill(9, 9, 15, 16, '.');
-  b.fill(2, 15, 2, 5, '#');
-  const g = b.group({ tile: '#', look: 'cracked' });
-  b.fill(2, 15, 6, 8, g);
+  b.fill(2, 15, 2, 3, '#');
+  const g = b.group({ tile: '#', look: 'bolted' });
+  b.fill(2, 15, 4, 8, g);
   const id = b.troll('The whole roof slab crashes down', { type: 'safe-notch', hint: 'The whole roof slab crashes down – drop into the slot in the floor and wait there until it lifts.', hazards: [[2, 9, 14, 6], [9, 15, 1, 2]] });
   b.trigger({ when: { zone: b.rect(2, 9, 1, 6) }, delay: 64, do: [{ move: g, by: [0, 6], ticks: 16, deadly: true, returnAfter: 40, returnTicks: 50 }, { say: 'say.rumble', at: [9, 3], ticks: 30 }], troll: id });
   const X = b.px(0);

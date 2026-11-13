@@ -2,7 +2,7 @@
 // its effect is on exactly while you are above that strip (the hint highlights it).
 import { T, run, runL, J, land, wait } from '../lib.mjs';
 
-const strip = (b, x0, x1, tint, y1 = 17) => { const g = b.group({ tile: '#', tint }); b.fill(x0, x1, 15, y1, g); return g; };
+const strip = (b, x0, x1, tint, y1 = 15) => { b.fill(x0, x1, y1 + 1, 17, '#'); const g = b.group({ tile: '#', tint }); b.fill(x0, x1, 15, y1, g); return g; };
 
 /** TRAP controls-swap: after a pit you land on a purple strip where left and right are swapped. */
 function controlsSwap(b) {
