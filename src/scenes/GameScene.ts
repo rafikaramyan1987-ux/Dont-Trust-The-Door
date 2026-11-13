@@ -129,6 +129,9 @@ export interface Snapshot {
   arrow: boolean;
   gravX: number;
   cam: string;
+  /** Distance to the nearest projectile ahead (px). */
+  shot: number;
+  roofed: boolean;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -306,6 +309,16 @@ export class GameScene extends Phaser.Scene {
     this.bubbles = [];
     this.sysButtons = [];
     this.touchBtns = [];
+    // per-run objects (a scene restart destroys their images)
+    this.storm = null;
+    this.clone = null;
+    this.shots = [];
+    this.darkImg = null;
+    this.smudgeImg = null;
+    this.arrowImg = null;
+    this.fakeClearUI = null;
+    this.cps = [];
+    this.cpFlags = [];
   }
 
   create(): void {
@@ -1440,8 +1453,8 @@ export class GameScene extends Phaser.Scene {
       const c = this.clone.path[this.clone.path.length - 1 - this.clone.delay];
       if (Math.abs(c.x - this.pbody.center.x) < HIT_R && Math.abs(c.y - this.pbody.center.y) < HIT_R + 4) { this.kill('clone'); return; }
     }
-    // lightning
-    if (this.storm && this.storm.strikeT > 0 && Math.abs(this.storm.strikeX - this.pbody.center.x) < HIT_R + 4) { this.kill('storm'); return; }
+    // lightning (a roof over your head keeps you safe)
+    if (this.storm && this.storm.strikeT > 0 && Math.abs(this.storm.strikeX - this.pbody.center.x) < HIT_R + 4 && !this.roofed()) { this.kill('storm'); return; }
     // checkpoint flags: the furthest one touched is where you respawn
     this.cps.forEach((c, i) => {
       if (i <= this.cpIdx || !overlap(big, { x: c.x - 20, y: c.y - 80, w: 40, h: 80 })) return;
@@ -1496,6 +1509,13 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.sfx('coin');
+  }
+
+  /** Is there solid ground anywhere above the hero (shelter from lightning)? */
+  private roofed(): boolean {
+    const tx = Math.floor(this.pbody.center.x / TILE);
+    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 1000 + tx)) return true;
+    return false;
   }
 
   /** Widest hint box that fits the visible screen (phones are narrow). */
@@ -1815,6 +1835,15 @@ export class GameScene extends Phaser.Scene {
       const dist = Math.hypot(dx, dy) || 1;
       g.ox += (dx / dist) * d.homing;
       g.oy += (dy / dist) * d.homing;
+      // it cannot fly through walls: crashing into solid ground ends it
+      const tx = Math.floor((g.cx + g.ox) / TILE), ty = Math.floor((g.cy + g.oy) / TILE);
+      if (this.staticSolid.has(ty * 1000 + tx)) {
+        g.active = false;
+        g.visible = false;
+        g.container.setVisible(false);
+        this.emitDeath.emitParticleAt(g.cx + g.ox, g.cy + g.oy, 14);
+        this.sfx('slam');
+      }
     }
     if (d.frog && g.active) {
       const dx = hx - (g.cx + g.ox);
@@ -2203,6 +2232,8 @@ export class GameScene extends Phaser.Scene {
       cpX: this.cpIdx >= 0 ? this.cps[this.cpIdx].x : this.cps.length ? this.cps[0].x : -1, zoom: this.cameras.main.zoom,
       viewTiles: this.cameras.main.width / this.cameras.main.zoom / TILE, cpIdx: this.cpIdx, cpCount: this.cps.length,
       arrow: this.arrowOn, gravX: this.gravX,
+      shot: this.shots.reduce((m, sh) => (sh.x > b.center.x - 10 ? Math.min(m, sh.x - b.center.x) : m), 1e9),
+      roofed: this.roofed(),
       cam: [this.camFrozen && 'freeze', this.camFlip && 'flip', this.camZoomMul > 1 && 'zoom', this.camDark && 'dark', this.camStrobe && 'strobe', this.camSmudge && 'smudge', this.camBack && 'back', this.camSeasick && 'seasick', this.camDecoy && 'decoy'].filter(Boolean).join(','),
     };
   }
