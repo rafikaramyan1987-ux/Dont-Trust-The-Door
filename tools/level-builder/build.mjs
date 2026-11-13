@@ -110,7 +110,7 @@ function layout(spec, fillers) {
   });
   const f = fillers[spec.traps.length];
   if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99, style }]);
-  items.push([end, { style }]);
+  items.push([spec.endSeg ?? end, { style }, 'end']);
   return items;
 }
 

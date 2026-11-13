@@ -1373,6 +1373,7 @@ export class GameScene extends Phaser.Scene {
     // fake doors bite
     for (const f of this.fakeDoors) {
       if (f.group && !f.group.visible) continue;
+      if (f.group?.def.prop) continue;
       const fx = f.x + (f.group ? f.group.ox : 0), fy = f.y + (f.group ? f.group.oy : 0);
       const r = { x: fx - 14, y: f.flipped ? fy : fy - 64, w: 28, h: 64 };
       if (overlap(pr, r)) {
@@ -1395,9 +1396,10 @@ export class GameScene extends Phaser.Scene {
         }
         if (def?.warp) {
           // a warp door: sends you somewhere else (usually back)
+          const v = { x: this.pbody.velocity.x, y: this.pbody.velocity.y };
           this.player.setPosition(def.warp[0] * TILE + TILE / 2, (def.warp[1] + 1) * TILE - PHYS.bodyH / 2);
           this.pbody.reset(this.player.x, this.player.y);
-          this.pbody.setVelocity(0, 0);
+          this.pbody.setVelocity(v.x, v.y);
           this.say('say.warp', 'hero', 50);
           this.sfx('flip');
           this.cameras.main.flash(160, 255, 255, 255, false);

@@ -37,7 +37,7 @@ for (const [lv, p] of Object.entries(PLANS)) {
   }
   for (const [name, t] of Object.entries(p.traps)) {
     const s = await runPlan(page, level, t.solve, { checkpoint: t.cp });
-    const okS = s.final.state === 'play' && s.final.deathsLevel === 0;
+    const okS = (s.final.state === 'play' || s.final.state === 'won') && s.final.deathsLevel === 0;
     const d = await runPlan(page, level, t.die, { checkpoint: t.cp });
     const okD = d.final.deathsLevel > 0 && d.final.trolls.includes(t.id);
     console.log(`L${level} ${okS && okD ? 'ok ' : 'BAD'} "${name}" [${t.type}] solve: ${okS ? 'passed' : 'FAILED ' + pos(s.final)} · die: ${okD ? 'died (' + d.final.lastDeath + ')' : 'NOT DEAD/NOT FIRED ' + pos(d.final) + ' trolls=' + d.final.trolls}`);

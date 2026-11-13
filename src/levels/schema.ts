@@ -63,8 +63,10 @@ export interface GroupDef {
   invisible?: boolean;
   /** Fake doors: kick you away with this velocity [vx, vy] (px/s) instead of biting. */
   kick?: [number, number];
-  /** Fake doors: teleport you to this tile [x, y] instead of biting. */
+  /** Fake doors: a portal that teleports you to this tile [x, y] (you keep your speed). */
   warp?: [number, number];
+  /** Fake doors: a harmless prop (e.g. the portal's exit). */
+  prop?: boolean;
   /** Moves in a circle around its drawn position (tiles / ticks / radians); from the start. */
   orbit?: { r: number; period: number; phase?: number };
   /** Pulley: standing on this group lowers it and lifts the partner (px/tick, max tiles). */
