@@ -15,6 +15,7 @@ import { writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { start, checkpoint, end, connector } from './lib.mjs';
+import { course } from './parkour.mjs';
 import { dangerTiles } from './danger.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -100,21 +101,46 @@ class Builder {
   fakeExit(trollId) { this.fakeExits[String(this.lastF)] = trollId; }
 }
 
-/** Expand a recipe: start, traps (checkpoint after every 3rd), connectors, end. */
-function layout(spec, fillers) {
+/** A hand-written course (levels 11+): spec.between[i] is the platforming before trap i (and after the last). */
+function handCourse(b, { pieces, top }) {
+  return course(b, pieces, { top });
+}
+
+/**
+ * Expand a recipe: start, traps (checkpoint after every 3rd), connectors, end. Hand-made levels (11+) use their
+ * hand-written courses (spec.between) instead of generated connectors, and get an extra checkpoint before any item
+ * that would end more than MAX_CP_GAP tiles after the previous checkpoint (`extra`: item indices, from a measuring
+ * pass).
+ */
+function layout(spec, fillers, extra = new Set()) {
   const style = spec.style ?? 'ground';
   const items = [[start, { tutorial: spec.id === 1, style }]];
+  const course = (i) => {
+    const c = spec.between?.[i];
+    if (c && c.length) items.push([handCourse, { pieces: c }]);
+  };
   spec.traps.forEach((tr, i) => {
     const f = fillers[i];
-    if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i + SALT, style }]);
+    if (spec.handmade) course(i);
+    else if (f && !(Array.isArray(tr) && tr[1]?.noFiller)) items.push([connector, { w: f, seed: spec.id * 100 + i + SALT, style }]);
     items.push(Array.isArray(tr) ? tr : [tr, {}]);
     if ((i + 1) % 3 === 0 && i + 1 < spec.traps.length) items.push([checkpoint, { style }]);
   });
   const f = fillers[spec.traps.length];
-  if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99 + SALT, style }]);
+  if (spec.handmade) course(spec.traps.length);
+  else if (f) items.push([connector, { w: f, seed: spec.id * 100 + 99 + SALT, style }]);
   items.push([spec.endSeg ?? end, { style }, 'end']);
-  return items;
+  if (!extra.size) return items;
+  const out = [];
+  items.forEach((it, i) => {
+    if (extra.has(i)) out.push([checkpoint, { style }]);
+    out.push(it);
+  });
+  return out;
 }
+
+/** at most this many tiles between two checkpoints (start → first, between, last → EXIT) in levels 11+ */
+export const MAX_CP_GAP = 200;
 
 function buildLevel(spec, items, labels) {
   const b = new Builder(spec.id, labels);
@@ -159,7 +185,21 @@ function rectsOfTiles(tiles) {
 }
 
 function compile(spec, fillers) {
-  const items = layout(spec, fillers);
+  let items = layout(spec, fillers);
+  if (spec.handmade) {
+    // measuring pass: where does each item start and end?
+    const { segs } = buildLevel(spec, items, {});
+    const extra = new Set();
+    let last = 0;
+    segs.forEach((sg, i) => {
+      if (sg.fn === 'checkpoint') last = sg.x0;
+      else if (sg.x0 + sg.w - last > MAX_CP_GAP - 4 && i > 0 && segs[i - 1].fn !== 'checkpoint') {
+        extra.add(i);
+        last = sg.x0;
+      }
+    });
+    if (extra.size) items = layout(spec, fillers, extra);
+  }
   // two passes so segments can refer to positions of later segments (door destinations)
   let { b } = buildLevel(spec, items, {});
   const out = buildLevel(spec, items, b.newLabels);
@@ -230,7 +270,7 @@ for (const spec of specs.sort((a, b) => a.id - b.id)) {
   // measure without fillers, then spread connectors so the level reaches its target width
   const slots = spec.traps.length + 1;
   const base = compile(spec, new Array(slots).fill(0)).width;
-  const deficit = Math.max(0, spec.minWidth - base);
+  const deficit = spec.handmade ? 0 : Math.max(0, spec.minWidth - base);
   const fillers = new Array(slots).fill(0);
   if (deficit > 0) {
     const open = [...Array(slots).keys()].filter((i) => !(Array.isArray(spec.traps[i]) && spec.traps[i][1]?.noFiller));
@@ -239,6 +279,8 @@ for (const spec of specs.sort((a, b) => a.id - b.id)) {
     for (const i of open) { if (left <= 0) break; const w = Math.max(8, Math.min(per + ((i * 3) % 4), left < 8 ? 8 : left)); fillers[i] = w; left -= w; }
   }
   const { level, plans, width, text } = compile(spec, fillers);
+  if (spec.handmade && Math.abs(width - spec.minWidth) > spec.minWidth * 0.01)
+    throw new Error(`level ${spec.id}: ${width} tiles, the table says ${spec.minWidth} (±1%: ${Math.ceil(spec.minWidth * 0.99)}-${Math.floor(spec.minWidth * 1.01)})`);
   for (const k of Object.keys(en)) if (k.startsWith(`L${spec.id}.`)) delete en[k];
   Object.assign(en, text);
   const txt = JSON.stringify(level, null, 2)

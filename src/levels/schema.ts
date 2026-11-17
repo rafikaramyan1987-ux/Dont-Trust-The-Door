@@ -83,6 +83,10 @@ export interface GroupDef {
   tint?: number;
   /** Blocks: one physics body per column (needed for `eat`). */
   columns?: boolean;
+  /** Blocks: a push button / pressure plate on top of the block (its colour); it sinks while stood on. */
+  button?: 'red' | 'green';
+  /** Blocks: the button hangs under the block (a ceiling switch you bonk from below). */
+  ceilButton?: boolean;
 }
 
 export type Rect = [number, number, number, number]; // tile x, y, w, h
@@ -139,6 +143,10 @@ export type Action =
   | { say: string; at: 'door' | 'hero' | [number, number]; ticks?: number }
   | { shake: number; ticks?: number }
   | { slowmo: number }
+  /** The (hidden) group appears column by column from the left at this speed (px/tick): a bridge building itself. */
+  | { grow: string; speed: number }
+  /** A conveyor group changes its speed (px/s, + = right; the arrows turn round). */
+  | { belt: string; speed: number }
   | { show: string }
   | { hide: string }
   | { scare: true };
@@ -157,6 +165,8 @@ export interface TriggerDef {
   /** Zone effect: `do` runs whenever the hero enters the zone, `undo` when he leaves it. */
   hold?: boolean;
   undo?: Action[];
+  /** With hold: the undo actions run this many ticks after the hero left (0 = at once). */
+  undoDelay?: number;
   /**
    * Keep the result after a checkpoint respawn: if this trigger's zone lies before the
    * checkpoint, its final state (door moved, floor gone …) is applied instantly when the

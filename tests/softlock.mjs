@@ -18,7 +18,9 @@
 // fall to the ceiling and back), platforms on orbits, followers and pulleys (sampled
 // positions), teleporting platforms (cumulative moves), portal doors (an edge to their
 // exit) and kicking doors (a wall). Moves that return on their own are transient and add no
-// world state.
+// world state. Level 11+: buttons (their triggers are ordinary touch triggers), bridges that build themselves
+// (`grow`: the finished bridge is a world state), belts that turn round (`belt`: a belt is walkable floor either way;
+// against it you hop, with it you are carried into the trap's pit, a death).
 
 const ROWS = 18;
 const SOLID = '#';
@@ -87,6 +89,7 @@ function groupStates(level) {
     if ('hide' in a) add(a.hide, { dx: 0, dy: 0, present: false });
     if ('show' in a) add(a.show, { dx: 0, dy: 0, present: true });
     if ('pop' in a) add(a.pop, { dx: 0, dy: 0, present: true });
+    if ('grow' in a) add(a.grow, { dx: 0, dy: 0, present: true }); // a bridge building itself: its finished state
     if ('eat' in a || 'toss' in a) add(a.eat ?? a.toss, { dx: 0, dy: 0, present: false });
     if ('activate' in a) add(a.activate, { dx: 0, dy: 0, present: false });
     if ('move' in a) {

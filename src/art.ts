@@ -840,6 +840,15 @@ function drawTrapProps(scene: Phaser.Scene): void {
   ctx.fillStyle = '#ff5a5a'; ellipse(ctx, 16, 10, 2.5, 2.5); ctx.fill();
   add(scene, 'turret-mouth', c);
 
+  // push buttons: a coloured cap on a steel base (drawn on top of a block; flipped for ceiling switches)
+  for (const [name, cap, light] of [['red', '#ff5a5a', '#ff9d9d'], ['green', '#4fd16a', '#9cf0ad']] as const) {
+    [c, ctx] = canvas(34, 14);
+    rr(ctx, 1, 9, 32, 5, 2); ctx.fillStyle = '#8d93a8'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+    rr(ctx, 5, 2, 24, 9, 4); ctx.fillStyle = cap; ctx.fill(); ctx.stroke();
+    rr(ctx, 9, 4, 10, 2.5, 1.2); ctx.fillStyle = light; ctx.fill();
+    add(scene, `plate-${name}`, c);
+  }
+
   // copycat frog (spiky, deadly)
   [c, ctx] = canvas(TILE, TILE);
   ctx.fillStyle = '#c9cfe0';

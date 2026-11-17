@@ -55,6 +55,12 @@ interface MoveState {
 interface GroupRT {
   id: string;
   def: GroupDef;
+  /** conveyor speed now (px/s; a `belt` action changes it) */
+  belt: number;
+  arrows: Phaser.GameObjects.Image[];
+  /** button caps (pressed while the hero touches the group) */
+  plates: Phaser.GameObjects.Image[];
+  pressed: boolean;
   tiles: { tx: number; ty: number }[];
   container: Phaser.GameObjects.Container;
   bodies: Phaser.GameObjects.Zone[];
@@ -76,6 +82,9 @@ interface GroupRT {
   toss: { vx: number; vy: number } | null;
   eatX: number | null;
   eatSpeed: number;
+  /** `grow`: the group appears column by column from the left; tiles left of growX exist */
+  growX: number | null;
+  growSpeed: number;
   active: boolean;
   frogVy: number;
   frogAir: boolean;
@@ -91,7 +100,7 @@ interface GroupRT {
 
 interface Shot { x: number; y: number; vx: number; left: number; img: Phaser.GameObjects.Image }
 
-interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean }
+interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean; undoAt?: number }
 
 export interface Snapshot {
   level: number;
@@ -1002,8 +1011,8 @@ export class GameScene extends Phaser.Scene {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
-      toss: null, eatX: null, eatSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
-      cx: 0, cy: 0, img: null, minTx: 0,
+      toss: null, eatX: null, eatSpeed: 0, growX: null, growSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
+      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false,
     };
     g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
     g.cy = ((Math.min(...tiles.map((v) => v.ty)) + Math.max(...tiles.map((v) => v.ty)) + 1) / 2) * TILE;
@@ -1027,7 +1036,20 @@ export class GameScene extends Phaser.Scene {
       if (def.ice) img.setTint(0xbfe9ff);
       if (def.tint) img.setTint(def.tint);
       if (def.invisible) img.setAlpha(0);
-      if (def.conveyor) this.addConveyorArrows(container, tiles, def.conveyor);
+      if (def.conveyor) g.arrows = this.addConveyorArrows(container, tiles, def.conveyor);
+      if (def.button) {
+        // the button cap on every top (or, for a ceiling switch, bottom) tile of the group
+        const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
+        for (const v of tiles) {
+          const edge = def.ceilButton ? !own.has((v.ty + 1) * 1000 + v.tx) : !own.has((v.ty - 1) * 1000 + v.tx);
+          if (!edge) continue;
+          const y = def.ceilButton ? (v.ty + 1) * TILE : v.ty * TILE;
+          const cap = this.add.image(v.tx * TILE + TILE / 2, y + (def.ceilButton ? -1 : 1), `plate-${def.button}`).setScale(1 / RES).setOrigin(0.5, 1).setFlipY(!!def.ceilButton);
+          if (def.ceilButton) cap.setOrigin(0.5, 0);
+          container.add(cap);
+          g.plates.push(cap);
+        }
+      }
       if (def.turret) container.add(this.add.image(minX * TILE + 4, (minY + maxY + 1) / 2 * TILE, 'turret-mouth').setScale(1 / RES));
       if (!def.fake) {
         const rects = def.columns ? [...new Set(tiles.map((v) => v.tx))].flatMap((cx) => mergeRects(tiles.filter((v) => v.tx === cx))) : mergeRects(tiles);
@@ -1077,13 +1099,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Animated chevrons on a conveyor belt. */
-  private addConveyorArrows(c: Phaser.GameObjects.Container, tiles: { tx: number; ty: number }[], speed: number): void {
+  private addConveyorArrows(c: Phaser.GameObjects.Container, tiles: { tx: number; ty: number }[], speed: number): Phaser.GameObjects.Image[] {
     const tops = tiles.filter((v) => !tiles.some((u) => u.tx === v.tx && u.ty === v.ty - 1));
+    const out: Phaser.GameObjects.Image[] = [];
     for (const v of tops) {
       const img = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + 9, 'chevron').setScale(1 / RES).setFlipX(speed < 0);
       c.add(img);
       this.tweens.add({ targets: img, x: img.x + Math.sign(speed) * 14, alpha: { from: 1, to: 0.35 }, duration: 420, repeat: -1 });
+      out.push(img);
     }
+    return out;
   }
 
   private addSpike(tx: number, ty: number, dir: Dir, group: GroupRT | null): void {
@@ -1216,7 +1241,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.jumpedNow = false;
     // sideways pull and conveyor belts shift the speed you settle at
-    const belt = gr && this.ride?.def.conveyor ? this.ride.def.conveyor : 0;
+    const belt = gr && this.ride?.belt ? this.ride.belt : 0;
     const bias = this.gravX + belt;
     const grip = gr && this.ride?.def.ice ? 0.05 : 1;
     const maxRun = mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun;
@@ -1589,14 +1614,27 @@ export class GameScene extends Phaser.Scene {
   // Triggers & actions
 
   private checkTriggers(): void {
+    this.updateButtons();
     const pr = this.playerRect(0);
     for (const t of this.triggers) {
-      if (t.def.hold && t.def.when.zone) {
-        // zone effects: on while inside, undone on leaving
-        const [x, y, ww, hh] = t.def.when.zone;
-        const inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
-        if (inside && !t.inside) { t.inside = true; this.troll(t.def.troll); this.runActions(t.def.do, t.fired); t.fired = true; }
-        else if (!inside && t.inside) { t.inside = false; this.runActions(t.def.undo ?? [], true); }
+      if (t.def.hold && (t.def.when.zone || t.def.when.touch)) {
+        // zone effects: on while inside (or while touching the group), undone on leaving
+        let inside = false;
+        if (t.def.when.zone) {
+          const [x, y, ww, hh] = t.def.when.zone;
+          inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+        } else inside = this.touchingGroup(t.def.when.touch!, pr);
+        if (inside && !t.inside) {
+          t.inside = true;
+          if (t.undoAt !== undefined) t.undoAt = undefined;
+          else { this.troll(t.def.troll); this.runActions(t.def.do, t.fired); }
+          t.fired = true;
+        } else if (!inside && t.inside) {
+          t.inside = false;
+          if (t.def.undoDelay) t.undoAt = this.levelTick + t.def.undoDelay;
+          else this.runActions(t.def.undo ?? [], true);
+        }
+        if (t.undoAt !== undefined && this.levelTick >= t.undoAt) { t.undoAt = undefined; this.runActions(t.def.undo ?? [], true); }
         continue;
       }
       if (t.fired) continue;
@@ -1610,13 +1648,7 @@ export class GameScene extends Phaser.Scene {
         if (ok && w.airborne) ok = !this.grounded;
         if (ok && w.grounded) ok = this.grounded;
         if (ok && w.landFaster !== undefined) ok = this.grounded && !this.wasGrounded && Math.abs(this.lastVy) >= w.landFaster;
-      } else if (w.touch) {
-        const g = this.groups.get(w.touch);
-        if (g && g.visible) {
-          const e = { x: pr.x - 2, y: pr.y - 2, w: pr.w + 4, h: pr.h + 4 };
-          for (const tt of g.tiles) if (overlap(e, { x: tt.tx * TILE + g.ox, y: tt.ty * TILE + g.oy, w: TILE, h: TILE })) ok = true;
-        }
-      }
+      } else if (w.touch) ok = this.touchingGroup(w.touch, pr);
       if (!ok) continue;
       t.fired = true;
       if (t.def.id) this.fired.add(t.def.id);
@@ -1627,6 +1659,28 @@ export class GameScene extends Phaser.Scene {
         if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true, stopAt: t.def.stopAt });
       }
     }
+  }
+
+  /** button caps sink while the hero touches their block (presentation; the trigger does the work) */
+  private updateButtons(): void {
+    const pr = this.playerRect(0);
+    for (const g of this.groups.values()) {
+      if (!g.plates.length) continue;
+      const p = this.touchingGroup(g.id, pr);
+      if (p === g.pressed) continue;
+      g.pressed = p;
+      if (p) this.sfx('click');
+      for (const im of g.plates) im.setScale(1 / RES, (p ? 0.45 : 1) / RES);
+    }
+  }
+
+  /** the hero touches a visible group (stands on it, bumps it from below or the side) */
+  private touchingGroup(id: string, pr: R): boolean {
+    const g = this.groups.get(id);
+    if (!g || !g.visible) return false;
+    const e = { x: pr.x - 2, y: pr.y - 2, w: pr.w + 4, h: pr.h + 4 };
+    for (const tt of g.tiles) if (overlap(e, { x: tt.tx * TILE + g.ox, y: tt.ty * TILE + g.oy, w: TILE, h: TILE })) return true;
+    return false;
   }
 
   private runScheduled(): void {
@@ -1673,11 +1727,25 @@ export class GameScene extends Phaser.Scene {
         g.move = { fx: g.ox, fy: g.oy, tx: g.ox + a.by[0] * TILE, ty: g.oy + a.by[1] * TILE, t: 0, dur: Math.max(1, a.ticks), deadly: !!a.deadly, returnAfter: a.returnAfter, returnTicks: a.returnTicks, back: false };
         g.deadlyMove = !!a.deadly;
         if (a.deadly) { g.solid = false; trap = true; }
+      } else if ('belt' in a) {
+        const g = this.grp(a.belt);
+        g.belt = a.speed;
+        for (const im of g.arrows) im.destroy();
+        g.arrows = a.speed ? this.addConveyorArrows(g.container, g.tiles, a.speed) : [];
+        this.sfx('click');
       } else if ('toss' in a) {
         const g = this.grp(a.toss);
         g.toss = { vx: a.vel[0], vy: a.vel[1] };
         g.visible = true;
         g.container.setVisible(true);
+        trap = true;
+      } else if ('grow' in a) {
+        const g = this.grp(a.grow);
+        g.growX = g.minTx * TILE;
+        g.growSpeed = a.speed;
+        g.visible = true;
+        g.container.setVisible(true);
+        if (g.img) g.img.setCrop(0, 0, 0, g.img.height);
         trap = true;
       } else if ('eat' in a) {
         const g = this.grp(a.eat);
@@ -1858,6 +1926,7 @@ export class GameScene extends Phaser.Scene {
         const base = z.getData('base') as { x: number; y: number };
         z.setPosition(base.x + g.ox, base.y + g.oy);
         if (g.eatX !== null && base.x + TILE / 2 <= g.eatX) (z.body as Phaser.Physics.Arcade.Body).enable = false;
+        if (g.growX !== null) (z.body as Phaser.Physics.Arcade.Body).enable = base.x + TILE / 2 <= g.growX;
       }
     }
     this.updateHunters();
@@ -1926,6 +1995,10 @@ export class GameScene extends Phaser.Scene {
       g.oy += g.toss.vy;
       g.toss.vy += 0.5;
       if (g.oy > WORLD_H + 200) { g.toss = null; g.visible = false; g.container.setVisible(false); }
+    }
+    if (g.growX !== null) {
+      g.growX += g.growSpeed;
+      if (g.img) g.img.setCrop(0, 0, Math.max(0, (g.growX - (g.minTx * TILE - 2)) * RES), g.img.height);
     }
     if (g.eatX !== null) {
       g.eatX += g.eatSpeed;
