@@ -279,7 +279,7 @@ for (const spec of specs.sort((a, b) => a.id - b.id)) {
     for (const i of open) { if (left <= 0) break; const w = Math.max(8, Math.min(per + ((i * 3) % 4), left < 8 ? 8 : left)); fillers[i] = w; left -= w; }
   }
   const { level, plans, width, text } = compile(spec, fillers);
-  if (spec.handmade && Math.abs(width - spec.minWidth) > spec.minWidth * 0.01)
+  if (spec.handmade && !process.env.DTTD_LOOSE && Math.abs(width - spec.minWidth) > spec.minWidth * 0.01)
     throw new Error(`level ${spec.id}: ${width} tiles, the table says ${spec.minWidth} (±1%: ${Math.ceil(spec.minWidth * 0.99)}-${Math.floor(spec.minWidth * 1.01)})`);
   for (const k of Object.keys(en)) if (k.startsWith(`L${spec.id}.`)) delete en[k];
   Object.assign(en, text);

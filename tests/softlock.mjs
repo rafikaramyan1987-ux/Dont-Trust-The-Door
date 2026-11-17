@@ -20,7 +20,9 @@
 // exit) and kicking doors (a wall). Moves that return on their own are transient and add no
 // world state. Level 11+: buttons (their triggers are ordinary touch triggers), bridges that build themselves
 // (`grow`: the finished bridge is a world state), belts that turn round (`belt`: a belt is walkable floor either way;
-// against it you hop, with it you are carried into the trap's pit, a death).
+// against it you hop, with it you are carried into the trap's pit, a death). Crates: each crate lists where it
+// can come to rest (`rest`, tile offsets); every one of those is a world state. Water: every water tile is a place
+// to be (you swim up and down), and deep water can drown you (a death).
 
 const ROWS = 18;
 const SOLID = '#';
@@ -105,6 +107,8 @@ function groupStates(level) {
   }
   // platforms that move by themselves
   for (const [g, d] of Object.entries(level.groups || {})) {
+    // crates: the places the level says they can come to rest (pushed to a wall, onto a plate, down a shaft …)
+    if (d.crate === true) for (const [dx, dy] of d.rest ?? []) add(g, { dx, dy, present: true });
     if (d.orbit) for (let k = 0; k < 8; k++) {
       const ph = d.orbit.phase ?? 0, a = ph + (k * Math.PI) / 4;
       add(g, { dx: d.orbit.r * (Math.cos(a) - Math.cos(ph)), dy: d.orbit.r * (Math.sin(a) - Math.sin(ph)), present: true });
@@ -123,6 +127,7 @@ function buildGrid(level, W, groups, cfg) {
   const grid = { warps: [] };
   const solid = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   const deadly = Array.from({ length: ROWS }, () => new Array(W).fill(false));
+  const water = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   level.map.forEach((row, y) => [...row].forEach((ch, x) => {
     if (ch === SOLID) solid[y][x] = true;
     else if (SPIKES.has(ch)) deadly[y][x] = true;
@@ -141,23 +146,33 @@ function buildGrid(level, W, groups, cfg) {
       if (d.tile === 'F' && d.warp) grid.warps.push({ x, y, to: d.warp });
       if (isDeadly) deadly[y][x] = true;
       if (d.tile === '=' && !d.dud) pads.push({ x, y, side: d.launch ? d.launch[0] : 0 });
+      if (d.tile === '~') water[y][x] = true;
     }
   }
   // fake EXITs bite
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'F') { deadly[y][x] = true; if (y > 0) deadly[y - 1][x] = true; } }));
-  return { solid, deadly, pads, warps: grid.warps };
+  // a turret's lane (its row, leftwards over its range, up to the first solid tile) is deadly: it fires while you
+  // are anywhere its activation zone covers (crates block it, but a crate lane is never a dead end)
+  for (const [g, cells] of Object.entries(groups)) {
+    const d = level.groups[g];
+    if (!d.turret) continue;
+    for (const [x0, y] of cells) for (let x = x0 - 1; x >= Math.max(0, x0 - d.turret.range) && !solid[y][x]; x--) deadly[y][x] = true;
+  }
+  return { solid, deadly, water, pads, warps: grid.warps };
 }
 
 /** Movement helpers for one world state. */
 function makeState(level, W, grid, reg) {
-  const { solid, deadly } = grid;
+  const { solid, deadly, water } = grid;
+  const Wt = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < W && water[y][x];
   const S = (x, y) => x < 0 || x >= W || (y >= 0 && y < ROWS && solid[y][x]);
   const free = (x, y) => x >= 0 && x < W && (y < 0 || y >= ROWS || !solid[y][x]);
   const D = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < W && deadly[y][x];
   const g = (x) => reg.grav[Math.max(0, Math.min(W - 1, x))];
   // under the ceiling in a "jump flips gravity" strip you can stand upside down
   const onCeil = (x, y) => reg.flipjump[Math.max(0, Math.min(W - 1, x))] && g(x) > 0 && S(x, y - 1) && !S(x, y + 1);
-  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y));
+  // swimming: every water tile is a place to be (you float, stroke up, sink down)
+  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y) || Wt(x, y));
   const key = (x, y) => y * 1000 + x;
 
   // falling from (x, y) with the column's gravity (optionally drifting sideways)
@@ -202,6 +217,16 @@ function makeState(level, W, grid, reg) {
       if (D(nx, y)) { out.push(DEATH); continue; }
       if (stand(nx, y)) out.push(key(nx, y));
       else out.push(...fall(nx, y, model === 'reach' ? M.drift : 0));
+    }
+    if (Wt(x, y)) {
+      // swim up / down; deep under water you can also run out of air (a death)
+      for (const ny of [y - 1, y + 1]) {
+        if (!free(x, ny)) continue;
+        if (D(x, ny)) out.push(DEATH);
+        else if (stand(x, ny)) out.push(key(x, ny));
+        else out.push(...fall(x, ny, 0));
+      }
+      if (Wt(x, y - 1)) out.push(DEATH);
     }
     // "jump flips gravity": fall to the other side (ceiling ↔ floor), drifting while you run
     if (reg.flipjump[x]) out.push(...fall(x, y, model === 'reach' ? 4 : 0, -gg));

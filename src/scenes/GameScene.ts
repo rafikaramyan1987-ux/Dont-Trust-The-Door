@@ -20,6 +20,10 @@ const SPIKE_DIR: Record<string, Dir> = { '^': 'up', v: 'down', '<': 'left', '>':
 const SPIKE_ROT: Record<Dir, number> = { up: 0, down: Math.PI, left: -Math.PI / 2, right: Math.PI / 2 };
 /** Input-lag trap: keys arrive this many ticks late. */
 const LAG_TICKS = 18;
+/** swimming: gravity in water, the slowest sink, the stroke speed, how long you can stay under (ticks) */
+const WATER = { gravity: 0.22, maxFall: 150, stroke: 330, strokeGap: 10, run: 0.65, air: 240 };
+/** how fast the hero pushes a crate (px/tick) */
+const CRATE_PUSH = 2.2;
 /** Hiccup trap: an involuntary hop every N ticks while on the ground. */
 const HICCUP_TICKS = 60;
 /** Hiccup hop strength (fraction of a full jump; it cannot be cut short). */
@@ -61,6 +65,12 @@ interface GroupRT {
   /** button caps (pressed while the hero touches the group) */
   plates: Phaser.GameObjects.Image[];
   pressed: boolean;
+  /** crates: speed (px/tick) and the push the hero gives it this tick */
+  cvx: number;
+  cvy: number;
+  push: number;
+  /** a magnet pulls this crate up */
+  magnet: boolean;
   tiles: { tx: number; ty: number }[];
   container: Phaser.GameObjects.Container;
   bodies: Phaser.GameObjects.Zone[];
@@ -203,6 +213,16 @@ export class GameScene extends Phaser.Scene {
   private fired = new Set<string>();
   private hints: { obj: Phaser.GameObjects.Text; after: number }[] = [];
   private staticSolid = new Set<number>();
+  /** the direction the hero is trying to move this tick (-1, 0, 1): crates are pushed by it */
+  private inputDir = 0;
+  /** swimming: in water this tick, the current there (px/s), air left (ticks), stroke cooldown */
+  private inWater = false;
+  private headUnder = false;
+  private current: [number, number] = [0, 0];
+  private air = WATER.air;
+  private strokeT = 0;
+  /** the air left, as bubbles over the hero's head (only while some is used up) */
+  private airGfx: Phaser.GameObjects.Graphics | null = null;
   private fakeWalls: GroupRT[] = [];
   /** Level width in tiles / pixels (levels scroll horizontally). */
   cols = 32;
@@ -890,6 +910,13 @@ export class GameScene extends Phaser.Scene {
 
     // Decorations: anti-gravity bubbles
     for (const d of L.decor ?? []) {
+      if (d.kind === 'shadow') {
+        // a dark spot on the floor: something is about to land there
+        const g = this.track(this.add.graphics().setDepth(0.6));
+        g.fillStyle(0x2b2d42, 0.32).fillEllipse((d.x + d.w / 2) * TILE, d.y * TILE + 4, d.w * TILE * 0.9, 12);
+        this.tweens.add({ targets: g, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+        continue;
+      }
       const g = this.track(this.add.graphics().setDepth(4.8));
       g.fillStyle(0x9ef0ff, 0.22).fillRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
       g.lineStyle(4, 0xe6fdff, 0.7).strokeRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
@@ -918,6 +945,10 @@ export class GameScene extends Phaser.Scene {
     this.ctrlFlip = false;
     this.ctrlMode = 'normal';
     this.gScale = 1;
+    this.inWater = false;
+    this.headUnder = false;
+    this.air = WATER.air;
+    this.strokeT = 0;
     this.gravX = 0;
     this.lagQ = [];
     this.launchLock = 0;
@@ -1012,7 +1043,7 @@ export class GameScene extends Phaser.Scene {
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
       toss: null, eatX: null, eatSpeed: 0, growX: null, growSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
-      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false,
+      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false, cvx: 0, cvy: 0, push: 0, magnet: false,
     };
     g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
     g.cy = ((Math.min(...tiles.map((v) => v.ty)) + Math.max(...tiles.map((v) => v.ty)) + 1) / 2) * TILE;
@@ -1023,19 +1054,24 @@ export class GameScene extends Phaser.Scene {
       const minX = Math.min(...tiles.map((v) => v.tx)), minY = Math.min(...tiles.map((v) => v.ty));
       const maxX = Math.max(...tiles.map((v) => v.tx)), maxY = Math.max(...tiles.map((v) => v.ty));
       const k = `grp-${this.lvl.id}-${id}`;
-      if (!this.textures.exists(k)) {
+      if (def.crate) {
+        // wooden crates instead of terrain
+        for (const v of tiles) container.add(this.add.image(v.tx * TILE, v.ty * TILE, def.look === 'cracked' ? 'crate-cracked' : 'crate').setOrigin(0).setScale(1 / RES));
+      } else if (!this.textures.exists(k)) {
         const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
         const seam = (x: number, y: number) => !own.has(y * 1000 + x) && this.staticSolid.has(y * 1000 + x);
         const bounds = { x: minX * TILE - 2, y: minY * TILE - 2, w: (maxX - minX + 1) * TILE + 4, h: (maxY - minY + 1) * TILE + 4 };
         addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 1000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
       }
-      const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
-      container.add(img);
-      g.img = img;
+      if (!def.crate) {
+        const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
+        container.add(img);
+        g.img = img;
+      }
       container.setDepth(def.fake ? 6 : 0.5);
-      if (def.ice) img.setTint(0xbfe9ff);
-      if (def.tint) img.setTint(def.tint);
-      if (def.invisible) img.setAlpha(0);
+      if (def.ice) g.img?.setTint(0xbfe9ff);
+      if (def.tint) g.img?.setTint(def.tint);
+      if (def.invisible) g.img?.setAlpha(0);
       if (def.conveyor) g.arrows = this.addConveyorArrows(container, tiles, def.conveyor);
       if (def.button) {
         // the button cap on every top (or, for a ceiling switch, bottom) tile of the group
@@ -1080,6 +1116,27 @@ export class GameScene extends Phaser.Scene {
       for (const v of tiles) this.addBall(v.tx, v.ty, g);
       if (def.frog) for (const b of this.balls) if (b.group === g) b.img.setTexture('frog');
       if (def.homing) for (const b of this.balls) if (b.group === g) b.img.setTexture('bird');
+    } else if (t === '~') {
+      // water: a translucent body with a wavy surface where no water is above (drawn over the hero)
+      container.setDepth(4.6);
+      const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
+      const gfx = this.add.graphics();
+      const deep = def.tint ?? 0x3aa6d8;
+      for (const v of tiles) {
+        const top = !own.has((v.ty - 1) * 1000 + v.tx);
+        gfx.fillStyle(deep, top ? 0.42 : 0.5).fillRect(v.tx * TILE, v.ty * TILE + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
+        if (top) {
+          gfx.fillStyle(0xe6fbff, 0.85).fillRect(v.tx * TILE, v.ty * TILE + 5, TILE, 3);
+          gfx.fillStyle(0xe6fbff, 0.7).fillCircle(v.tx * TILE + 10, v.ty * TILE + 6, 3).fillCircle(v.tx * TILE + 30, v.ty * TILE + 6, 3);
+        }
+        if (def.current && (v.tx + v.ty) % 2 === 0) {
+          const a = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + TILE / 2, 'chevron').setScale(1 / RES).setAlpha(0.45);
+          a.setRotation(Math.atan2(def.current[1], def.current[0]));
+          container.add(a);
+          this.tweens.add({ targets: a, x: a.x + Math.cos(a.rotation) * 12, y: a.y + Math.sin(a.rotation) * 12, alpha: 0.1, duration: 600, repeat: -1 });
+        }
+      }
+      container.addAt(gfx, 0);
     } else if (t === 'H') {
       container.setDepth(4);
       const h = new Hero(this, g.cx, (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE);
@@ -1221,11 +1278,50 @@ export class GameScene extends Phaser.Scene {
     this.checkInteractions();
   }
 
+  /** is the hero in water (centre), is his head under water, and the current there */
+  private updateWater(): void {
+    const b = this.pbody;
+    const cx = b.center.x, cy = b.center.y, hy = b.top + 4;
+    let inW = false, head = false;
+    let cur: [number, number] = [0, 0];
+    for (const g of this.groups.values()) {
+      if (g.def.tile !== '~' || !g.visible) continue;
+      for (const t of g.tiles) {
+        const x = t.tx * TILE + g.ox, y = t.ty * TILE + g.oy;
+        if (cx >= x && cx < x + TILE) {
+          if (cy >= y && cy < y + TILE) { inW = true; if (g.def.current) cur = g.def.current; }
+          if (hy >= y && hy < y + TILE) head = true;
+        }
+      }
+    }
+    if (inW && !this.inWater) { this.sfx('land'); this.emitDust.emitParticleAt(cx, cy, 6); }
+    this.inWater = inW;
+    this.headUnder = head;
+    this.current = cur;
+    if (this.strokeT > 0) this.strokeT--;
+    if (head) {
+      this.air--;
+      if (this.air <= 0) this.kill('drown');
+    } else this.air = Math.min(WATER.air, this.air + 6);
+  }
+
   private controlPlayer(k: Keys, jumpPressed: boolean): void {
+    this.updateWater();
     const b = this.pbody;
     const g = this.gdir;
     let vx = b.velocity.x;
     let vy = b.velocity.y;
+    const wet = this.inWater;
+    if (wet && jumpPressed) {
+      // a swim stroke (any time, not only on the ground); with the head above the surface: jump out
+      if (this.strokeT === 0) {
+        vy = this.headUnder ? -WATER.stroke : -PHYS.jumpVel * 0.85;
+        this.strokeT = WATER.strokeGap;
+        this.hero.jump();
+        this.sfx('jump');
+      }
+      jumpPressed = false;
+    }
     let dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
     const mode = this.ctrlMode;
     if (mode === 'flip') dir = -dir;
@@ -1242,9 +1338,9 @@ export class GameScene extends Phaser.Scene {
     this.jumpedNow = false;
     // sideways pull and conveyor belts shift the speed you settle at
     const belt = gr && this.ride?.belt ? this.ride.belt : 0;
-    const bias = this.gravX + belt;
+    const bias = this.gravX + belt + (wet ? this.current[0] : 0);
     const grip = gr && this.ride?.def.ice ? 0.05 : 1;
-    const maxRun = mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun;
+    const maxRun = (mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun) * (wet ? WATER.run : 1);
     const accMul = (mode === 'turbo' ? 2 : 1) * grip;
     if (mode === 'frozen') {
       jumpPressed = false; // no control at all, and you keep sliding
@@ -1277,11 +1373,14 @@ export class GameScene extends Phaser.Scene {
       this.jumping = false;
     }
     if (vy * g >= 0) this.jumping = false;
-    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale;
+    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale * (wet ? WATER.gravity : 1);
     vy += g * PHYS.gravity * mul * DT;
-    if (vy * g > PHYS.maxFall) vy = PHYS.maxFall * g;
+    if (wet) vy += this.current[1] * DT;
+    const fallCap = wet ? WATER.maxFall + Math.max(0, this.current[1]) * 0.4 : PHYS.maxFall;
+    if (vy * g > fallCap) vy = fallCap * g;
     b.setVelocity(vx, vy);
     this.lastVy = vy;
+    this.inputDir = mode === 'frozen' || this.launchLock > 0 ? 0 : dir;
   }
 
   private afterPhysics(): void {
@@ -1305,6 +1404,17 @@ export class GameScene extends Phaser.Scene {
       const impact = Math.abs(this.lastVy);
       this.hero.land(impact);
       if (impact > 350) { this.dust(6); this.sfx('land'); }
+    }
+    // pushing a crate: walking into its side moves it next tick
+    const dir = this.inputDir;
+    if (dir !== 0 && (dir > 0 ? b.blocked.right : b.blocked.left)) {
+      for (const g of this.groups.values()) {
+        if (g.def.crate !== true || !g.visible || g.state !== 'idle') continue;
+        const box = this.crateBox(g);
+        const face = dir > 0 ? box.x : box.x + box.w;
+        const edge = dir > 0 ? b.right : b.left;
+        if (Math.abs(face - edge) <= 3 && b.bottom > box.y + 4 && b.top < box.y + box.h - 2) g.push = dir * CRATE_PUSH;
+      }
     }
     // fell out of the world
     if ((this.gdir > 0 && b.y > WORLD_H + 30) || (this.gdir < 0 && b.bottom < -30)) this.kill('pit');
@@ -1623,6 +1733,7 @@ export class GameScene extends Phaser.Scene {
         if (t.def.when.zone) {
           const [x, y, ww, hh] = t.def.when.zone;
           inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+          if (t.def.when.crate) inside = this.crateIn(t.def.when.crate, t.def.when.zone);
         } else inside = this.touchingGroup(t.def.when.touch!, pr);
         if (inside && !t.inside) {
           t.inside = true;
@@ -1644,11 +1755,13 @@ export class GameScene extends Phaser.Scene {
       else if (w.after) ok = this.fired.has(w.after);
       else if (w.zone) {
         const [x, y, ww, hh] = w.zone;
-        ok = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+        ok = w.crate && !w.crateZone ? this.crateIn(w.crate, w.zone) : overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
         if (ok && w.airborne) ok = !this.grounded;
         if (ok && w.grounded) ok = this.grounded;
         if (ok && w.landFaster !== undefined) ok = this.grounded && !this.wasGrounded && Math.abs(this.lastVy) >= w.landFaster;
       } else if (w.touch) ok = this.touchingGroup(w.touch, pr);
+      // the hero's condition and, at the same time, a crate in its zone
+      if (ok && w.crate && w.crateZone) ok = this.crateIn(w.crate, w.crateZone);
       if (!ok) continue;
       t.fired = true;
       if (t.def.id) this.fired.add(t.def.id);
@@ -1727,6 +1840,19 @@ export class GameScene extends Phaser.Scene {
         g.move = { fx: g.ox, fy: g.oy, tx: g.ox + a.by[0] * TILE, ty: g.oy + a.by[1] * TILE, t: 0, dur: Math.max(1, a.ticks), deadly: !!a.deadly, returnAfter: a.returnAfter, returnTicks: a.returnTicks, back: false };
         g.deadlyMove = !!a.deadly;
         if (a.deadly) { g.solid = false; trap = true; }
+      } else if ('respawn' in a) {
+        // a crate goes back to where it was drawn (a chute drops the next one)
+        const g = this.grp(a.respawn);
+        g.ox = 0; g.oy = 0; g.cvx = 0; g.cvy = 0; g.state = 'idle';
+        g.visible = true; g.container.setVisible(true);
+      } else if ('magnet' in a) {
+        const g = this.grp(a.magnet);
+        g.magnet = a.on;
+        if (a.on) trap = true;
+      } else if ('shove' in a) {
+        const g = this.grp(a.shove);
+        g.cvx = a.vx;
+        trap = true;
       } else if ('belt' in a) {
         const g = this.grp(a.belt);
         g.belt = a.speed;
@@ -1913,6 +2039,7 @@ export class GameScene extends Phaser.Scene {
         }
         if (g.move && g.move.t < 0) { g.ox = g.move.fx; g.oy = g.move.fy; }
       }
+      if (g.def.crate === true && g.state === 'idle' && g.visible) this.crateStep(g);
       if (g.chase) {
         g.ox += g.chase.vx;
         g.oy += g.chase.vy;
@@ -1940,6 +2067,86 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Special group behaviours (all deterministic, per tick). */
+  /** a crate (group) overlaps the zone */
+  private crateIn(id: string, [x, y, w, h]: [number, number, number, number]): boolean {
+    const g = this.groups.get(id);
+    if (!g || !g.visible || g.state === 'gone') return false;
+    const b = this.crateBox(g);
+    return overlap({ x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 }, { x: x * TILE, y: y * TILE, w: w * TILE, h: h * TILE });
+  }
+
+  /** a crate's box in world px (its tiles + offset) */
+  private crateBox(g: GroupRT): R {
+    const xs = g.tiles.map((t) => t.tx), ys = g.tiles.map((t) => t.ty);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return { x: x0 * TILE + g.ox, y: y0 * TILE + g.oy, w: (Math.max(...xs) - x0 + 1) * TILE, h: (Math.max(...ys) - y0 + 1) * TILE };
+  }
+
+  /** is the box blocked by the level (static tiles or another visible solid group)? */
+  private boxBlocked(r: R, self: GroupRT): GroupRT | 'static' | null {
+    const x0 = Math.floor((r.x + 0.5) / TILE), x1 = Math.floor((r.x + r.w - 0.5) / TILE);
+    const y0 = Math.floor((r.y + 0.5) / TILE), y1 = Math.floor((r.y + r.h - 0.5) / TILE);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (this.staticSolid.has(ty * 1000 + tx)) return 'static';
+    for (const g of this.groups.values()) {
+      if (g === self || !g.visible || !g.solid || g.state === 'gone') continue;
+      for (const t of g.tiles) if (overlap({ x: r.x + 0.5, y: r.y + 0.5, w: r.w - 1, h: r.h - 1 }, { x: t.tx * TILE + g.ox, y: t.ty * TILE + g.oy, w: TILE, h: TILE })) return g;
+    }
+    return null;
+  }
+
+  /** crates fall, are pushed, slide on ice, ride belts, and crush the hero when they land on him */
+  private crateStep(g: GroupRT): void {
+    const box = this.crateBox(g);
+    if (g.magnet) {
+      // held by the magnet: no pushing, it only rises (slowly) until it hits something
+      g.push = 0;
+      g.cvx = 0;
+      g.cvy = Math.max(-1.6, g.cvy - 0.2);
+      let up = -g.cvy;
+      while (up > 0) {
+        const d = Math.min(1, up);
+        if (this.boxBlocked({ x: box.x, y: box.y - d, w: box.w, h: box.h }, g)) { g.cvy = 0; break; }
+        box.y -= d; g.oy -= d; up -= d;
+      }
+      return;
+    }
+    const under = this.boxBlocked({ x: box.x, y: box.y + 2, w: box.w, h: box.h }, g);
+    const floor = under && under !== 'static' ? under : null;
+    const onGround = !!under;
+    // horizontal: the hero's push, ice keeps the speed, belts carry
+    if (g.push) g.cvx = g.push;
+    else if (!(onGround && floor?.def.ice) && onGround) g.cvx = 0;
+    const belt = onGround && floor?.belt ? floor.belt / 60 : 0;
+    g.push = 0;
+    let dx = g.cvx + belt;
+    const step = Math.sign(dx);
+    while (dx !== 0) {
+      const d = Math.abs(dx) >= 1 ? step : dx;
+      const bl = this.boxBlocked({ x: box.x + d, y: box.y, w: box.w, h: box.h }, g);
+      if (bl) {
+        // a crate sliding behind another one keeps its speed (the front one may fall away next tick)
+        if (bl === 'static' || bl.def.crate !== true) g.cvx = 0;
+        break;
+      }
+      box.x += d; g.ox += d; dx -= d;
+    }
+    // vertical: gravity (or a magnet lifting it slowly)
+    g.cvy = onGround && g.cvy >= 0 ? 0 : Math.min(14, g.cvy + 0.55);
+    let dy = g.cvy;
+    while (dy > 0) {
+      const d = Math.min(1, dy);
+      if (this.boxBlocked({ x: box.x, y: box.y + d, w: box.w, h: box.h }, g)) {
+        if (g.cvy > 6) { this.sfx('slam'); this.cameras.main.shake(90, 0.005); }
+        g.cvy = 0;
+        break;
+      }
+      box.y += d; g.oy += d; dy -= d;
+    }
+    // a falling crate lands on the hero
+    if (g.cvy > 3 && this.state === 'play' && overlap(this.playerRect(4), box) && this.pbody.center.y > box.y + box.h / 2) this.kill('crush');
+    if (box.y > WORLD_H + 80) { g.state = 'gone'; g.visible = false; g.container.setVisible(false); }
+  }
+
   private groupBehaviour(g: GroupRT): void {
     const d = g.def;
     const hx = this.pbody.center.x, hy = this.pbody.center.y;
@@ -2015,7 +2222,12 @@ export class GameScene extends Phaser.Scene {
       sh.x += sh.vx;
       sh.left -= Math.abs(sh.vx);
       const tx = Math.floor(sh.x / TILE), ty = Math.floor(sh.y / TILE);
-      if (sh.left <= 0 || this.staticSolid.has(ty * 1000 + tx)) { sh.left = -1; sh.img.destroy(); }
+      const blocked = [...this.groups.values()].some((g) => g.def.crate && g.visible && g.state === 'idle' && overlap({ x: sh.x - 8, y: sh.y - 8, w: 16, h: 16 }, this.crateBox(g)));
+      if (sh.left <= 0 || blocked || this.staticSolid.has(ty * 1000 + tx)) {
+        if (blocked) { this.emitDust.emitParticleAt(sh.x, sh.y, 5); this.sfx('land'); }
+        sh.left = -1;
+        sh.img.destroy();
+      }
     }
     this.shots = this.shots.filter((sh) => sh.left >= 0);
     if (this.clone) {
@@ -2260,7 +2472,22 @@ export class GameScene extends Phaser.Scene {
     this.emitDust.emitParticleAt(b.center.x, this.gdir > 0 ? b.bottom : b.top, n);
   }
 
+  private renderAir(): void {
+    if (!this.airGfx || !this.airGfx.active) this.airGfx = this.track(this.add.graphics().setDepth(7));
+    const g = this.airGfx;
+    g.clear();
+    if (this.air >= WATER.air || this.state !== 'play') return;
+    const n = Math.ceil((this.air / WATER.air) * 4);
+    const b = this.pbody;
+    for (let i = 0; i < 4; i++) {
+      const x = b.center.x - 27 + i * 18, y = b.top - 22;
+      g.lineStyle(2.5, 0x2b2d42, 0.8).strokeCircle(x, y, 6.5);
+      if (i < n) g.fillStyle(0xbfefff, 0.95).fillCircle(x, y, 5);
+    }
+  }
+
   private render(dt: number): void {
+    this.renderAir();
     if (!this.pbody) return;
     const b = this.pbody;
     if (this.state !== 'won') {

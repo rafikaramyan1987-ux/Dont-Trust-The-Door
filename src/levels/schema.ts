@@ -20,7 +20,7 @@
  */
 
 /** H = a decoy hero sprite (no collision; the camera can follow it). */
-export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H';
+export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H' | '~';
 
 /** Is this map character a group id? */
 export function isGroupChar(ch: string): boolean {
@@ -87,6 +87,13 @@ export interface GroupDef {
   button?: 'red' | 'green';
   /** Blocks: the button hangs under the block (a ceiling switch you bonk from below). */
   ceilButton?: boolean;
+  /** Blocks: a wooden crate: it falls, the hero pushes it by walking into it, it slides on ice, rides belts and
+   *  crushes the hero if it lands on him. 'still': looks like a crate but stays put. */
+  crate?: boolean | 'still';
+  /** Water (tile '~'): a current that pushes the swimmer (px/s, [x, y]). */
+  current?: [number, number];
+  /** Crates: where the crate can come to rest (tile offsets) – world states for the soft-lock analyzer. */
+  rest?: [number, number][];
 }
 
 export type Rect = [number, number, number, number]; // tile x, y, w, h
@@ -106,6 +113,10 @@ export interface TriggerWhen {
   start?: boolean;
   /** Fires when the trigger with this id has fired (use with delay). */
   after?: string;
+  /** With zone: fires when this crate (group) is in the zone instead of the hero. With crateZone: the hero's own
+   *  condition (zone / touch) and, at the same time, this crate in crateZone (both on a fragile bridge). */
+  crate?: string;
+  crateZone?: Rect;
 }
 
 export type CtrlMode = 'normal' | 'flip' | 'nojump' | 'autorun' | 'lag' | 'hiccup' | 'superjump' | 'turbo' | 'frozen' | 'flipjump';
@@ -145,6 +156,12 @@ export type Action =
   | { slowmo: number }
   /** The (hidden) group appears column by column from the left at this speed (px/tick): a bridge building itself. */
   | { grow: string; speed: number }
+  /** A crate goes back to its drawn place (visible, at rest). */
+  | { respawn: string }
+  /** A magnet pulls a crate up (on) or lets it fall again (off). */
+  | { magnet: string; on: boolean }
+  /** A crate starts sliding at this speed (px/tick; it keeps it on ice). */
+  | { shove: string; vx: number }
   /** A conveyor group changes its speed (px/s, + = right; the arrows turn round). */
   | { belt: string; speed: number }
   | { show: string }
@@ -221,7 +238,7 @@ export interface LevelData {
   /** Every troll moment in the level (each must be referenced by a trigger/group/fake exit). */
   trolls?: TrollDef[];
   /** Decorations that show where a zone effect is (tile rects). */
-  decor?: { x: number; y: number; w: number; h: number; kind: 'bubble' }[];
+  decor?: { x: number; y: number; w: number; h: number; kind: 'bubble' | 'shadow' }[];
   /** Troll id credited when a fake EXIT (F) bites. */
   fakeExitTroll?: string;
   /** Per fake EXIT: tile x of the F → troll id (overrides fakeExitTroll). */
