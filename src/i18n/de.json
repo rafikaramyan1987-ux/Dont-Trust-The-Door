@@ -210,5 +210,8 @@
   "ui.soundOff": "Ton aus",
   "ui.soundOn": "Ton an",
   "ui.tagline": "ein Troll-Platformer, in dem dich das Level verrät",
-  "ui.title": "Don't Trust the Door"
+  "ui.title": "Don't Trust the Door",
+  "ui.hintAd": "Sieh dir eine Werbung für den Tipp an",
+  "ui.adNone": "Gerade ist keine Werbung verfügbar, versuch es später noch mal",
+  "ui.finalSub": "Alle {n} Level geschafft. Keine Tür legt dich je wieder rein … wahrscheinlich."
 }

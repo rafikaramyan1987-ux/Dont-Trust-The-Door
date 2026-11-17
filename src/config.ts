@@ -30,6 +30,10 @@ export const PHYS = {
 
 /** Death → restart delay (ticks). 16 ticks ≈ 0.27 s. */
 export const RESTART_TICKS = 16;
+/** levels the game is planned to have (the level select shows them all; those not built yet stay locked) */
+export const PLANNED_LEVELS = 30;
+/** level-select page size */
+export const PAGE_SIZE = 10;
 
 export interface Palette {
   name: string;

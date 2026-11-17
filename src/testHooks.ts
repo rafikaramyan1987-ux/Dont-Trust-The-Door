@@ -6,6 +6,7 @@ import Phaser from 'phaser';
 import type { GameScene } from './scenes/GameScene';
 import { Input, Keys } from './input';
 import { Save } from './save';
+import { Portal, PortalState } from './platform';
 import { Audio, SfxName, renderSoundtrack } from './audio';
 import { LEVELS } from './levels';
 import { Hero } from './game/Hero';
@@ -111,6 +112,10 @@ export function installTestHooks(game: Phaser.Game): void {
     kill() { scene().debugKill(); },
     snapCamera() { scene().debugSnapCamera(); },
     hint() { scene().debugHint(); },
+    /** the bulb as the player presses it (portal builds: the rewarded-ad card) */
+    pressHint() { scene().pressHint(); },
+    portal() { return { name: Portal.name, rewarded: Portal.rewardedSupported, ...PortalState }; },
+    audioState() { return { muted: Audio.muted, sysMuted: Audio.sysMuted, saved: Save.get().muted }; },
     levelData(id: number) { return LEVELS[id - 1]; },
     t,
     /** Switch language (as the picker does) and return the code in use. */

@@ -210,5 +210,8 @@
   "ui.soundOff": "Sound off",
   "ui.soundOn": "Sound on",
   "ui.tagline": "a troll platformer where the level betrays you",
-  "ui.title": "Don't Trust the Door"
+  "ui.title": "Don't Trust the Door",
+  "ui.hintAd": "Watch an ad for the hint",
+  "ui.adNone": "No ad available right now, try again later",
+  "ui.finalSub": "All {n} levels done. No door will ever fool you again… probably."
 }

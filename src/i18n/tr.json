@@ -210,5 +210,8 @@
   "ui.soundOff": "Ses kapalı",
   "ui.soundOn": "Ses açık",
   "ui.tagline": "bölümün sana ihanet ettiği bir trol platform oyunu",
-  "ui.title": "Kapıya Güvenme"
+  "ui.title": "Kapıya Güvenme",
+  "ui.hintAd": "İpucu için bir reklam izle",
+  "ui.adNone": "Şu anda reklam yok, daha sonra tekrar dene",
+  "ui.finalSub": "{n} bölümün hepsi bitti. Artık hiçbir kapı seni kandıramaz… büyük ihtimalle."
 }

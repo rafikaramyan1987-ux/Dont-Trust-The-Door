@@ -210,5 +210,8 @@
   "ui.soundOff": "Sem som",
   "ui.soundOn": "Com som",
   "ui.tagline": "um plataforma troll onde a fase te trai",
-  "ui.title": "Don't Trust the Door"
+  "ui.title": "Don't Trust the Door",
+  "ui.hintAd": "Assista a um anúncio para ver a dica",
+  "ui.adNone": "Nenhum anúncio disponível agora, tente de novo mais tarde",
+  "ui.finalSub": "Todas as {n} fases concluídas. Nenhuma porta vai te enganar de novo… provavelmente."
 }

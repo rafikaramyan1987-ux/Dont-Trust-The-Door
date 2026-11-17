@@ -11,6 +11,7 @@ import { Door } from '../game/Door';
 import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
+import { Portal, PortalState } from '../platform';
 import { applyLayout, Layout } from '../layout';
 import { Button, label, panel, bubble, fitText } from '../ui';
 
@@ -147,6 +148,10 @@ export class GameScene extends Phaser.Scene {
   private slowmo = 0;
   state: 'play' | 'dead' | 'won' = 'play';
   paused = false;
+  /** restarted only to apply a new language (the same run goes on: no new level_started) */
+  private resumed = false;
+  /** an ad is being shown from the level-clear card or the hint card: buttons do nothing meanwhile */
+  private adBusy = false;
   private stateT = 0;
   private gdir = 1;
   private grounded = false;
@@ -275,7 +280,9 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean | number; hintUsed?: boolean }): void {
+  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean | number; hintUsed?: boolean; resume?: boolean }): void {
+    this.resumed = !!data.resume;
+    this.adBusy = false;
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
     this.cpIdx = data.checkpoint === true ? 0 : typeof data.checkpoint === 'number' ? data.checkpoint : -1;
     this.hintUsed = !!data.hintUsed;
@@ -361,12 +368,15 @@ export class GameScene extends Phaser.Scene {
       if (c === 'pause') this.togglePause();
       else if (c === 'restart' && !this.overlay) this.restartLevel();
       else if (c === 'mute') this.toggleMute();
-      else if (c === 'confirm' && this.overlay && this.state === 'won') this.nextLevel();
+      else if (c === 'confirm' && this.overlay && this.state === 'won') this.leaveClear(() => this.nextLevel());
     });
 
     this.buildLevel();
     Audio.startMusic();
     this.cameras.main.fadeIn(180, 43, 45, 66);
+    if (!this.resumed) Portal.levelStarted(this.levelNum);
+    Portal.gameplay(true);
+    this.events.once('shutdown', () => Portal.gameplay(false));
   }
 
   private onTouchUI = () => {
@@ -534,7 +544,7 @@ export class GameScene extends Phaser.Scene {
       this.sysButtons.push(b);
       return b;
     };
-    this.hintBtn = mk('bulb', () => this.useHint(), '#f2b705');
+    this.hintBtn = mk('bulb', () => this.pressHint(), '#f2b705');
     if (this.hintUsed) { this.hintBtn.enabled = false; this.hintBtn.setAlpha(0.35); }
     mk('restart', () => this.restartLevel(), '#ff6a3d');
     this.muteBtn = mk(Audio.muted ? 'mute' : 'sound', () => this.toggleMute());
@@ -1121,7 +1131,7 @@ export class GameScene extends Phaser.Scene {
   // Main loop
 
   update(_time: number, delta: number): void {
-    if (!this.paused && !this.overlay) {
+    if (!this.paused && !this.overlay && !PortalState.paused) {
       const scale = this.slowmo > 0 ? 0.4 : 1;
       this.acc += Math.min(delta, 100) * scale;
       let n = 0;
@@ -1466,6 +1476,45 @@ export class GameScene extends Phaser.Scene {
       this.say('say.checkpoint', 'hero', 60);
       this.sfx('coin');
     });
+  }
+
+  /**
+   * The bulb. Where the portal has rewarded ads, it asks "Watch an ad for the hint": the hint is given only when the
+   * SDK confirms the reward; otherwise "No ad available right now, try again later" and the hint stays unused. On the
+   * web build (and where rewarded ads are not supported) the hint is free. Still one hint per level.
+   */
+  pressHint(): void {
+    if (this.hintUsed || this.state !== 'play' || this.adBusy) return;
+    if (!Portal.rewardedSupported) { this.useHint(); return; }
+    if (this.overlay) return;
+    const c = this.makeOverlay();
+    c.setName('hintAd');
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    c.add(panel(this, cx, cy, 560, 300, 0xfff6d5));
+    c.add(this.add.image(cx, cy - 92, 'icon-bulb').setScale(1.3 / RES));
+    c.add(fitText(label(this, cx, cy - 18, t('ui.hintAd'), 30, '#ffd23f', 8), 500));
+    const no = new Button(this, cx - 110, cy + 80, { w: 150, h: 64, icon: 'left', color: '#ff8a5b' }, () => {
+      if (this.adBusy) return;
+      this.closeOverlay();
+    });
+    const yes = new Button(this, cx + 110, cy + 80, { w: 150, h: 64, icon: 'play', color: '#6fd36b' }, () => {
+      if (this.adBusy) return;
+      this.adBusy = true;
+      void Portal.rewarded().catch(() => false).then((ok) => {
+        this.adBusy = false;
+        if (!this.sys.isActive()) return;
+        this.closeOverlay();
+        if (ok) this.useHint();
+        else {
+          const box = this.showHintBox(t('ui.adNone'));
+          box.setName('adNone');
+          this.tweens.add({ targets: box, alpha: 0, delay: 2600, duration: 400, onComplete: () => { box.destroy(); if (this.hintBox === box) this.hintBox = null; } });
+        }
+      });
+    });
+    no.setName('hintAdNo');
+    yes.setName('hintAdYes');
+    c.add([no, yes]);
   }
 
   /** Spend the level's one hint: describe (and highlight) the next trap ahead of the hero. */
@@ -1993,6 +2042,8 @@ export class GameScene extends Phaser.Scene {
     this.state = 'won';
     this.stateT = 0;
     Save.complete(this.lvl.id, LEVELS.length);
+    Portal.levelCompleted(this.levelNum);
+    Portal.gameplay(false);
     this.pbody.setVelocity(0, 0);
     this.pbody.enable = false;
     this.door?.pop();
@@ -2004,10 +2055,11 @@ export class GameScene extends Phaser.Scene {
 
   private showComplete(): void {
     const last = this.levelNum >= LEVELS.length;
+    if (last) { this.showFinalWin(); return; }
     const c = this.makeOverlay();
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
     c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
-    const t1 = fitText(label(this, cx, cy - 130, last ? t('ui.beatGame') : t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
+    const t1 = fitText(label(this, cx, cy - 130, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
     const msg = fitText(label(this, cx, cy - 64, t(this.lvl.winMessage), 46, '#ffd23f', 10), 600);
     const d = this.deathsLevel;
     const t2 = fitText(label(this, cx, cy + 6, d === 0 ? t('ui.deathsNone') : t('ui.deathsLevel', { n: d }), 28, '#ffffff', 7), 600);
@@ -2016,10 +2068,47 @@ export class GameScene extends Phaser.Scene {
     const ms = msg.scale;
     msg.setScale(0.2);
     this.tweens.add({ targets: msg, scale: ms, duration: 320, ease: 'Back.Out' });
-    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.toSelect());
-    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel());
-    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: last ? t('ui.menu') : t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.nextLevel());
+    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
+    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel()).setName('clearRetry');
+    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear(() => this.nextLevel())).setName('clearNext');
     c.add([bLv, bRe, bNx]);
+  }
+
+  /** After the very last level: the end of the game (every earlier level shows the normal level-clear card). */
+  private showFinalWin(): void {
+    const c = this.makeOverlay();
+    c.setName('finalWin');
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    c.add(panel(this, cx, cy, 760, 500, 0x2b2d42));
+    for (let i = 0; i < 5; i++) {
+      const st = this.add.image(cx + (i - 2) * 92, cy - 170 + Math.abs(i - 2) * 14, 'icon-star').setScale(1.5 / RES).setTint(0xffd23f);
+      this.tweens.add({ targets: st, angle: { from: -12, to: 12 }, duration: 520 + i * 60, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+      c.add(st);
+    }
+    const title = fitText(label(this, cx, cy - 78, t('ui.beatGame'), 58, '#ffd23f', 12), 700);
+    const sub = fitText(label(this, cx, cy - 4, t('ui.finalSub', { n: LEVELS.length }), 26, '#fff6d5', 6), 700);
+    const d = fitText(label(this, cx, cy + 56, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 26, '#ffffff', 7), 700);
+    c.add([title, sub, d]);
+    const ts = title.scale;
+    title.setScale(0.2);
+    this.tweens.add({ targets: title, scale: ts, duration: 420, ease: 'Back.Out' });
+    this.time.addEvent({ delay: 500, repeat: 8, callback: () => this.emitConfetti.emitParticleAt(this.cameras.main.midPoint.x + Phaser.Math.Between(-400, 400), this.cameras.main.worldView.y + 40, 30) });
+    const bLv = new Button(this, cx - 140, cy + 160, { w: 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
+    const bMe = new Button(this, cx + 140, cy + 160, { w: 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear(() => this.toTitle())).setName('clearMenu');
+    c.add([bLv, bMe]);
+  }
+
+  /**
+   * "Next level" / "Levels" on the level-clear card: the only place an interstitial may show (portal builds; the
+   * portal decides whether one does). Never during a level, never after a death, no pre-roll.
+   */
+  private leaveClear(go: () => void): void {
+    if (this.adBusy || this.state !== 'won') return;
+    this.adBusy = true;
+    void Portal.interstitial().catch(() => undefined).then(() => {
+      this.adBusy = false;
+      if (this.sys.isActive()) go();
+    });
   }
 
   nextLevel(): void {
@@ -2070,9 +2159,9 @@ export class GameScene extends Phaser.Scene {
     const items: [string, string, string, () => void][] = [
       ['play', t('ui.resume'), '#6fd36b', () => this.togglePause()],
       ['restart', t('ui.restart'), '#9f7bd8', () => this.restartLevel()],
-      ['menu', t('ui.levels'), '#5b8cff', () => this.toSelect()],
+      ['menu', t('ui.levels'), '#5b8cff', () => { Portal.levelFailed(this.levelNum); this.toSelect(); }],
     ];
-    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 112 + i * 78, { w: 300, h: 62, icon, text, fontSize: 26, color }, fn)));
+    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 112 + i * 78, { w: 300, h: 62, icon, text, fontSize: 26, color }, fn).setName(['pauseResume', 'pauseRestart', 'pauseLevels'][i])));
     const mb = new Button(this, cx, cy + 122, { w: 300, h: 56, icon: Audio.muted ? 'mute' : 'sound', text: Audio.muted ? t('ui.soundOff') : t('ui.soundOn'), fontSize: 22, color: '#ff8a5b' }, () => {
       this.toggleMute();
       mb.setIcon(Audio.muted ? 'mute' : 'sound');
@@ -2080,7 +2169,7 @@ export class GameScene extends Phaser.Scene {
     });
     c.add(mb);
     const lb = new Button(this, cx, cy + 192, { w: 300, h: 56, icon: 'globe', text: currentLangName(), fontSize: 22, color: '#41c6c0' }, () => {
-      openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed }); });
+      openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed, resume: true }); });
     });
     lb.setName('langbtn');
     c.add(lb);
