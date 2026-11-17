@@ -21,19 +21,22 @@ const out = await page.evaluate(({ level, plan, cp, a, z, gk }) => {
   let step = 0, total = 0;
   for (const [keys, until] of plan) {
     const cond = typeof until === 'number' ? null : new Function('s', `return (${until});`);
+      // "R+J?<condition>": hold R, and J while the condition holds (e.g. swim strokes whenever you sink)
+      const jk = keys.includes('+J?') ? new Function('s', `return (${keys.split('+J?')[1]});`) : null;
     let n = 0;
     for (;;) {
       if (typeof until === 'number' ? n >= until : cond(s)) break;
-      T.sim(keys, 1); n++; total++;
+      const k = jk ? keys.split('+J?')[0] + (jk(s) ? 'J' : '') : keys;
+      T.sim(k, 1); n++; total++;
       s = T.state();
       const tx = s.x / 40;
-      if (tx >= a && tx <= z && total % 2 === 0) lines.push(`#${step} [${keys}|${until}] t=${s.levelTick} x=${tx.toFixed(2)} y=${(s.y / 40).toFixed(2)} vx=${s.vx.toFixed(0)} vy=${s.vy.toFixed(0)} gr=${s.grounded} ${s.state} ${JSON.stringify(gk.map((k) => [k, s.g[k]]))}`);
+      if (tx >= a && tx <= z && total % 2 === 0) lines.push(`#${step} [${keys}|${until}] t=${s.levelTick} x=${tx.toFixed(2)} y=${(s.y / 40).toFixed(2)} vx=${s.vx.toFixed(0)} vy=${s.vy.toFixed(0)} gr=${s.grounded} wet=${s.wet} hu=${s.headUnder} air=${s.air} ${s.state} ${JSON.stringify(gk.map((k) => [k, s.g[k]]))}`);
       if (s.state !== 'play' || total > 20000 || s.deathsLevel > 0) return lines.concat([`END ${s.state} ${s.lastDeath} at x=${tx.toFixed(2)}`]);
     }
     step++;
   }
   return lines.concat(['plan finished']);
 }, { level: Number(lv), plan, cp, a: Number(a), z: Number(z), gk: (process.env.G ?? '').split(',').filter(Boolean) });
-console.log(out.slice(-80).join('\n'));
+console.log(out.slice(-(+process.env.N || 80)).join('\n'));
 await browser.close();
 server.close();

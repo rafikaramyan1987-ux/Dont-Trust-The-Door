@@ -27,11 +27,11 @@ const FONT = readFileSync(join(ROOT, 'node_modules/@fontsource/nunito/files/nuni
 /** trap moments of the new levels: [level, trap type, 'die' | 'solve', frames after it fires] */
 const MOMENTS = [
   [11, 'delayed-crusher', 'die', 26],
-  [11, 'wrong-colour', 'die', 30],
-  [11, 'call-button', 'die', 46],
+  [12, 'crate-chute', 'die', 20],
+  [13, 'bubble-lift', 'die', 40],
   [11, 'heavy-gate', 'die', 30],
-  [11, 'reverse-belt', 'die', 40],
-  [11, 'slow-bridge', 'solve', 120],
+  [12, 'crate-shield', 'die', 20],
+  [13, 'waterfall-pause', 'die', 30],
 ];
 
 const { server, url } = await serveDist();
@@ -187,11 +187,11 @@ for (const [i, m] of MOMENTS.slice(0, 4).entries()) {
   }
 }
 
-// videos: level 11 from the start (four traps in the first 28 s); trailers: the first checkpoint on (three more)
+// videos: level 11 from the start (four traps in the first 28 s); trailers: level 12 / level 13 from their first checkpoint
 if (!args.has('--no-video')) {
   await video(1280, 720, [{ level: 11, seconds: 28 }], P('y8', 'gameplay-1280x720.mp4'));
-  await video(1920, 1080, [{ level: 11, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1920x1080.mp4'));
-  await video(1080, 1920, [{ level: 11, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1080x1920.mp4'));
+  await video(1920, 1080, [{ level: 12, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1920x1080.mp4'));
+  await video(1080, 1920, [{ level: 13, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1080x1920.mp4'));
 }
 
 await browser.close();

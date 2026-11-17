@@ -14,9 +14,10 @@
 | Media → Game Card Promo | `media/promo-card-760x570.jpg` |
 | Media → Gameplay Video (16:9) | `media/gameplay-1280x720.mp4` (H.264, 28 s, no sound) |
 
-Screenshots (real play, level 11, the same four moments at both sizes): the crusher drops in the corridor, the green
-button drops the ceiling spikes, the lift lands on its own button, the drawbridge falls forward. The video is one
-continuous take of level 11 from its start (four traps), rendered frame by frame from the bot's recorded run.
+Screenshots (real play, the same four moments at both sizes, all from the new levels): the crusher drops in the
+corridor (level 11), the chute drops a crate into the gap (level 12), the bubble stream carries the hero into the
+spikes (level 13), the drawbridge falls forward (level 11). The video is one continuous take of level 11 from its start
+(four traps), rendered frame by frame from the bot's recorded run.
 
 ## Name
 

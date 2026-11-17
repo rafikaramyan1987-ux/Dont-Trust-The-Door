@@ -2,12 +2,17 @@
 
 A troll platformer where the level betrays you. Original web game by AtelierPro Aramyan Games.
 
-Ten long levels, ten themes, **86 traps – every one a different idea**: the floor, coins, springs,
+**13 long levels, 13 themes, 122 traps – every one a different idea**: the floor, coins, springs,
 the cave ceiling, your own controls, gravity, the EXIT door itself, the camera, things that chase
-you, and finally the moving platforms. No trap type, mechanic or map section appears twice. Every
-trap is surprising the first time and solvable the second: you always see the hero, each trap has
-one machine-checked solution, and a checkpoint flag follows every three traps. Death restarts
-instantly; the death counter is always on screen. Playable in **8 languages**.
+you, the moving platforms – and in the new levels buttons that lie, crates you push and climb, and water
+you swim in. No trap type, mechanic or map section appears twice. Every trap is surprising the first time
+and solvable the second: you always see the hero, each trap has one machine-checked solution, and a
+checkpoint flag follows every three traps (from level 11 also never more than 200 tiles apart). Death
+restarts instantly; the death counter is always on screen. Playable in **8 languages**. Also built for
+the game portals Playgama, GamePix, Y8 and CrazyGames (see [Portal builds](#portal-builds)).
+
+Levels 11–20 follow a length table (each level 15% longer than the one before, with one more trap);
+levels **11, 12 and 13 are done**, levels 14–30 are still to come (the level select already shows all 30).
 
 **Play:** https://rafikaramyan1987-ux.github.io/Dont-Trust-The-Door/ (phone: play in landscape)
 
@@ -48,7 +53,7 @@ wraps, which the self-test checks for every language at 640×360.
 <img src="docs/media/screens/00-title-ru.png" width="49%">
 </p>
 
-## The 86 traps
+## The 122 traps
 
 Each line: the trap, its type key (unique across the game) and its hint – which describes exactly
 the solution the bot uses to pass it.
@@ -211,6 +216,67 @@ the solution the bot uses to pass it.
 9. **The pulley sinks you into spikes** (`pulley-platforms`) – The two platforms hang on a pulley: yours sinks while the other rises – jump across as soon as it is a bit higher, then straight on to the high island.
    - 🚩 *checkpoint*
 10. **The platform teleports away under you** (`teleporting-platform`) – The platform blinks out and reappears 4 tiles further – stand on it and jump forward the moment it blinks, then again.
+### 11. Push the Button — Buttons and switches do something other than they promise
+
+462 tiles (table 462) · 11 traps · 3 checkpoints · bot win 70.4 s
+
+1. **The button drops the floor under itself** (`button-trapdoor`) – The button opens the gate, then the floor under the button drops away – step on it and keep walking straight through.
+2. **The bridge builds itself slower than you run** (`slow-bridge`) – The button builds the bridge one plank at a time, slower than you run – wait on the button until it reaches the far side.
+3. **The button drops the crusher when you get there** (`delayed-crusher`) – The button opens the gate, then drops the cracked crusher in the corridor a moment later – wait on the button until it has crashed down, then hop over it.
+   - 🚩 *checkpoint*
+4. **Green is the dangerous colour** (`wrong-colour`) – The green button drops the ceiling spikes on you – jump over it; the red button lowers the bridge.
+5. **The bridge button pulls the bridge away** (`retract-button`) – The button in front of the bridge makes the bridge vanish – hop over the button onto the bridge.
+6. **The ceiling switch opens the hatch you stand on** (`ceiling-switch`) – Bonking the ceiling switch opens the wall, and the cracked hatch under its left half – bonk it standing on the solid floor under its right half.
+   - 🚩 *checkpoint*
+7. **The lift lands on the button** (`call-button`) – The button calls the lift, which drops spikes first onto the button – step back off it, wait until it lands, hop on and ride it up over the wall.
+8. **The button turns the belt round** (`reverse-belt`) – The button turns the belts round toward the spike pit and opens the gate – keep hopping to the gate: the belt cannot push you while you are in the air.
+9. **The drawbridge falls on you** (`heavy-gate`) – The button drops the drawbridge forward across the pit, onto the edge in front of it – stay on the button until it has landed, then walk over it.
+   - 🚩 *checkpoint*
+10. **The wall button opens a pit instead** (`fake-wall-button`) – Do not press the button: it opens a pit in front of the wall. The wall is fake – hop over the button and walk straight through it.
+11. **The bars close again before you get there** (`exit-bars`) – The button opens the bars in front of the EXIT, but they close again after a second – go up the steps without stopping.
+
+### 12. Crate Expectations — Crates you push, climb and trust
+
+532 tiles (table 531) · 12 traps · 3 checkpoints · bot win 106.7 s
+
+1. **A crate falls on its shadow** (`crate-shadow`) – A crate drops onto the dark spot on the floor – wait until it lands, push it to the wall and climb up on it.
+2. **The top crate bites** (`crate-mimic`) – The cracked crate on top of the stack bites – do not land on it: jump over the whole stack from the ledge.
+3. **One push too many and the crate is gone** (`crate-plate`) – Push the crate onto the red plate and stop: it holds the bars open. One push more and it drops into the pit.
+   - 🚩 *checkpoint*
+4. **Pushing the crate brings the stack down** (`crate-avalanche`) – Do not push the crate on the floor: the shelf above gives way and the stack falls on you. Hop over it.
+5. **The crate on the belt rams you** (`crate-belt-ram`) – A crate drops onto the belt and rides it at you, too heavy to push back – jump over it as it comes.
+6. **The chute drops crates into the gap** (`crate-chute`) – The chute drops a crate through the gap every couple of seconds – wait for one to fall past, then jump at once.
+   - 🚩 *checkpoint*
+7. **A turret guards the low tunnel** (`crate-shield`) – A turret fires down the low tunnel, too low to jump in – push the crate ahead of you as a shield, then climb up on it.
+8. **The first step shoves the stairs away** (`crate-ice-stairs`) – Stepping on the small cracked crate shoves both crates across the ice into the gap – jump straight onto the big crate.
+9. **The bridge holds you or the crate, not both** (`crate-heavy-bridge`) – The cracked ice bridge breaks under you and the crate together – push the crate onto it, step back and let it slide across alone.
+   - 🚩 *checkpoint*
+10. **The spring shoots you into the spikes** (`crate-pad-damper`) – The spring launches you into the ceiling spikes – push the crate onto it and climb up on the crate instead.
+11. **The magnet lifts the crate into its spikes** (`crate-magnet`) – The magnet pulls the crate up to its spikes – jump on as it rises and hop off onto the ledge before the top.
+12. **The crate in the shaft is cardboard** (`cardboard-crate`) – The crate at the bottom of the shaft is cardboard over spikes – push the real crate down the shaft first, then drop onto it.
+
+### 13. The Deep End — Water betrays you
+
+614 tiles (table 611) · 13 traps · 4 checkpoints
+
+1. **The tunnel floods behind you** (`flood-tunnel`) – The low tunnel floods as soon as you are inside – do not turn back: swim on to the end and straight up the shaft before your air runs out.
+2. **The undertow drags you into the grate** (`undertow`) – Near the bottom of the pool a current drags you into the spiked grate – keep stroking (jump) and stay at the surface.
+3. **The pool freezes over** (`freezing-pool`) – The pool freezes over a moment after you jump in – swim under the wall at once and come up through the hole at the far end.
+   - 🚩 *checkpoint*
+4. **The bubble stream by the wall lifts you into spikes** (`bubble-lift`) – Both bubble streams lift you, but the one near the wall carries you into the spikes under the ledge – take the first one and step off onto the ledge.
+5. **The dam bursts and the flood washes you back** (`dam-break`) – When you reach the sluice gate it creaks and bursts, and a flood washes everything back into the spike pit – run back up onto the little ledge and wait until the water is gone.
+6. **The raft drifts over the falls** (`drifting-raft`) – The raft drifts all the way to the edge of the falls – jump up onto the ledge as it passes under it.
+   - 🚩 *checkpoint*
+7. **The pool is a whirlpool** (`whirlpool`) – The pool is a whirlpool: the water drags you to the spiked drain in the middle – do not swim, hop across on the two rocks.
+8. **The waterfall knocks you into the pit** (`waterfall-pause`) – The waterfall knocks anyone jumping through it down into the spikes – it pauses every few seconds: jump across right after it stops.
+9. **The water is too heavy to swim in** (`heavy-water`) – This dark water is too heavy to swim in: you sink at once onto the spikes – jump up onto the ledge above it instead.
+   - 🚩 *checkpoint*
+10. **The first air pocket is water** (`fake-air-pocket`) – The bright pocket halfway along the flooded tunnel is water, not air – keep going and breathe in the second pocket.
+11. **The pool is electrified** (`electric-water`) – Every few seconds the pool is electrified for a moment – wait for a zap, then swim across at once.
+12. **A spiked buoy drifts at you** (`spiked-buoy`) – A spiked buoy drifts along the surface toward you under the rock roof – dive to the bottom and let it pass over you.
+   - 🚩 *checkpoint*
+13. **A wall of water hangs over the pit** (`water-wall`) – The wall of water over the pit slows you down and you sink in it – jump in and keep stroking until you come out on the far side.
+
 ## Run it
 
 ```bash
@@ -256,14 +322,29 @@ the hint highlights) and `solution` (bot plan steps).
 
 Every trap is a segment function in `tools/level-builder/levels/Lnn.mjs` that draws its own terrain,
 registers its trap and returns its solution and a run that falls for it. `npm run levels` builds the
-JSON (checkpoints after every 3 traps, seeded trap-free connectors up to the target width, the
-danger area computed from the trap's own triggers and groups) and validates it; `npm run record`
-records frame-exact replays.
+JSON (checkpoints after every 3 traps, the danger area computed from the trap's own triggers and groups)
+and validates it; `npm run record` records frame-exact replays.
+
+Levels 1–10 fill the space between traps with seeded trap-free connectors. **From level 11 there is no
+generated filler:** the platforming between two traps is written by hand, piece by piece, in
+`spec.between` (`tools/level-builder/parkour.mjs`: steps, pits, spike pits, islands, blocks, low spiked
+roofs…). Every jump in such a course is checked at build time against a model of the hero's jump (the
+game's own physics numbers), so a course can never contain an impossible jump; the real game then plays
+every plan. A level 11+ must match the length table (±1%), and the builder adds a checkpoint wherever
+the next one would be more than 200 tiles away.
+
+New mechanics for levels 11–13: push buttons and ceiling switches (`button`, `ceilButton`), bridges that
+build themselves (`grow`), belts that turn round (`belt`), crates (`crate`: they fall, are pushed by
+walking into them, slide on ice, ride belts, stop turret shots, crush, are lifted by magnets; triggers can
+watch a crate: `when: { crate, zone }`), and water (tile `~`: jump = a swim stroke, 4 seconds of air
+shown as bubbles, `current`, electrified `zap` water).
 
 ## Tests (all run in CI)
 
-- **`npm run test:levels`** – widths ≥ 2× the previous ones; exactly 8 traps (10 in levels 8–10),
-  86 in total, all trap types unique; every trap has a hint key and a solution; its highlight equals
+- **`npm run test:levels`** – levels 1–10 at least 2× their old width, levels 11+ exactly as in the
+  length table (±1%, each 15% longer than the one before); exactly 8 traps (10 in levels 8–10, N in level
+  N ≥ 11), all trap types unique across the game; checkpoints after every 3 traps and, from level 11,
+  never more than 200 tiles apart; no copied **or mirrored** terrain; every trap has a hint key and a solution; its highlight equals
   its trigger area; a checkpoint after every 3 traps; no copied terrain (no 12-column stretch with ≥4
   non-trivial columns appears twice; groups compare by kind); no text except the level-1 tutorial;
   **no soft-locks**: `tests/softlock.mjs` explores every spot the hero can reach in every world state
@@ -274,11 +355,16 @@ records frame-exact replays.
   placeholders), or if a key used by code or levels is undefined.
 - **`npm run test:bot`** (headless Chromium, production build) – every level played through by the
   bot in real time on a 640×360 phone screen; every level won from the start and from each
-  checkpoint; for each of the 86 traps its solution from the previous checkpoint passes and walking
+  checkpoint; for each of the 122 traps its solution from the previous checkpoint passes and walking
   into it kills; a screenshot of every trap at 640×360; hint highlight, lifecycle and "changes
   nothing"; tutorial once, no text after deaths; checkpoint respawns; saving incl. old saves;
   default language, selector, saving, font coverage and text fitting in all 8 languages; the edge
-  arrow; layouts, touch and the full ▲ jump; no console errors.
+  arrow; layouts, touch and the full ▲ jump; the paged level select (30 slots); an old save that
+  finished level 10 unlocks level 11; no console errors. CI runs it as a matrix (levels 1–5, 6–10, 11–15,
+  16–20 and the level-independent checks), each job well under an hour: `node tests/run-selftest.mjs
+  --levels 11-15` / `--general`.
+- **`npm run test:portals`** – every portal build in a real browser with a mocked SDK (and the web build
+  with none): see [Portal builds](#portal-builds).
 
 Latest run: **179/179 checks passed**.
 
@@ -294,6 +380,57 @@ Latest run: **179/179 checks passed**.
 | 8 | 406 | 54.3 s | 38 / 21.8 / 5.3 s | 58 s |
 | 9 | 429 | 59.2 s | 42.3 / 24.6 / 6.9 s | 62.5 s |
 | 10 | 402 | 61.6 s | 46.6 / 23.2 / 7.1 s | 64.1 s |
+
+## Portal builds
+
+One code base, five builds. Each is a Vite mode and an npm script; the mode sets `__PLATFORM__` and only
+that portal's code is bundled (`src/platform/`: one `Platform` interface – init, language, storage, game
+ready, level started / completed / failed, interstitial, rewarded, pause and mute events).
+
+| Build | Command | Output | SDK |
+|---|---|---|---|
+| web (GitHub Pages) | `npm run build` | `dist/` | **none: no SDK, no ads, no network request** |
+| Playgama | `npm run submission:playgama` | `submission-playgama/dont-trust-the-door-playgama-v1.zip` | Bridge `https://bridge.playgama.com/v2/stable/playgama-bridge.js`, first script in `<head>`; `bridge.initialize()` runs before the game bundle; `playgama-bridge-config.json` beside `index.html` |
+| GamePix | `npm run submission:gamepix` | `submission-gamepix/dont-trust-the-door-gamepix-v1.zip` | SDK v3, `lifecycle: 'manual'`: loading 0–100, `loaded()`, `gameStart()` |
+| Y8 | `npm run submission:y8` | `submission-y8/dont-trust-the-door-y8-v1.zip` | minimal SDK 2.0 from Y8's CDN; IDs from `VITE_Y8_APP_ID` / `VITE_Y8_GAME_ID` |
+| CrazyGames | `npm run submission:crazygames` | `submission-crazygames/dont-trust-the-door-crazygames-v1.zip` | SDK v3 |
+
+`npm run submission` builds and checks all four. Every zip has `index.html` at its root, relative paths only
+and no request except its own portal's SDK.
+
+**Y8 IDs:** the committed Y8 zip has no App ID / Game ID yet (the check says so). Create the game in Y8
+Studio, then rebuild: `VITE_Y8_APP_ID=<app id> VITE_Y8_GAME_ID=<game id> npm run submission:y8`.
+
+**Language and saves:** the player's own 🌐 choice wins; otherwise the portal's language if the game has it,
+else the browser's, else English. Saves use the portal's storage where there is one (Playgama Bridge storage,
+the CrazyGames data module), else `localStorage` – the same key and format as the web version.
+
+**Lifecycle:** `game_ready` / `loaded()` once the title screen is shown; level started when a level begins;
+level completed at the EXIT; level failed only when the player quits a level from the pause menu (a death is
+not a failure). The game pauses and mutes during ads, on the portal's pause event and while the page is
+hidden, and comes back with the player's own sound setting.
+
+**Ads (never in the web build):**
+- Interstitial only when the player presses **Next level** or **Levels / Menu** on the level-clear card –
+  never during a level, never after a death, never before level 1 is finished, no pre-roll. No timer of
+  our own: how often one shows is the SDK's call (GamePix: at most one per 2 minutes).
+- Rewarded hint: the bulb asks "Watch an ad for the hint" (8 languages); the hint is given only when the
+  SDK confirms the reward, otherwise "No ad available right now, try again later" and the hint stays
+  available. Where rewarded ads are not supported (and on the web) the hint is free. Still one hint per
+  level, no other rewards.
+- Every ad request settles exactly once: finished, closed, failed, or an 8-second timeout.
+
+**Checks:** `scripts/<portal>/check.mjs` (zip layout, relative paths, size, the only allowed SDK origin, the
+portal's own requirements, the media sizes); `scripts/playgama/qa.mjs` runs the zip like Playgama's QA Tool
+(`?platform_id=qa_tool`: the `initialize` handshake, `game_ready`, level messages, Bridge storage, and the
+two failure paths); Playgama's own precheck is vendored (`scripts/playgama/precheck.mjs`).
+`tests/portals.mjs` runs every build in Chromium with a mocked SDK (`tests/portal-mocks.mjs`):
+interstitials only after a level clear, the rewarded hint only on a reward, pause + mute during ads, never
+stuck after a failed, dismissed or silent ad, portal pause events, hidden page, saves and language.
+
+**Media:** `npm run build && node tools/portal-media.mjs` renders every cover, screenshot, promo, icon and
+video from real play of the new levels (frames of the game at the exact target size; covers add the title).
+What goes into which form field: `submission-<portal>/README.md`.
 
 ## Media
 

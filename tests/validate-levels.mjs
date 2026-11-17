@@ -170,6 +170,8 @@ for (const L of levels) {
   const c = canon(L);
   const cols = Array.from({ length: L.map[0].length }, (_, x) => c(x));
   const owner = (x) => L.trolls.find((t) => x >= t.x && x < t.x + t.w)?.id ?? null;
+  // a symmetric trap (a pool with a bank on each side) mirrors itself: allowed when both windows overlap that trap
+  const traps = (x) => new Set(L.trolls.filter((t) => t.x < x + 12 && t.x + t.w > x).map((t) => t.id));
   for (let x = 0; x + 12 <= cols.length; x++) {
     const win = cols.slice(x, x + 12);
     if (win.filter((s) => !PLAIN.has(s)).length < 4) continue;
@@ -183,7 +185,8 @@ for (const L of levels) {
     if (L.id > 10) {
       const m = mirror(win).join('|');
       const pm = m !== k && seen.get(m);
-      if (pm && !(pm.id === L.id && o && pm.o === o)) fail(`level ${L.id}`, `terrain at x=${x}-${x + 11} is a mirrored copy of level ${pm.id} x=${pm.x}-${pm.x + 11}`);
+      const shared = pm && pm.id === L.id && [...traps(x)].some((id) => traps(pm.x).has(id));
+      if (pm && !(pm.id === L.id && o && pm.o === o) && !shared) fail(`level ${L.id}`, `terrain at x=${x}-${x + 11} is a mirrored copy of level ${pm.id} x=${pm.x}-${pm.x + 11}`);
     }
   }
 }

@@ -71,6 +71,8 @@ interface GroupRT {
   push: number;
   /** a magnet pulls this crate up */
   magnet: boolean;
+  /** electrified water: the sparks overlay */
+  zapFx: Phaser.GameObjects.Graphics | null;
   tiles: { tx: number; ty: number }[];
   container: Phaser.GameObjects.Container;
   bodies: Phaser.GameObjects.Zone[];
@@ -135,6 +137,10 @@ export interface Snapshot {
   hudDeaths: string;
   ctrlMode: string;
   gScale: number;
+  /** swimming: air left (ticks), in water, head under water */
+  air: number;
+  wet: boolean;
+  headUnder: boolean;
   camFrozen: boolean;
   camFlip: boolean;
   camZoom: number;
@@ -221,6 +227,7 @@ export class GameScene extends Phaser.Scene {
   private current: [number, number] = [0, 0];
   private air = WATER.air;
   private strokeT = 0;
+  private lastWet = -99;
   /** the air left, as bubbles over the hero's head (only while some is used up) */
   private airGfx: Phaser.GameObjects.Graphics | null = null;
   private fakeWalls: GroupRT[] = [];
@@ -949,6 +956,7 @@ export class GameScene extends Phaser.Scene {
     this.headUnder = false;
     this.air = WATER.air;
     this.strokeT = 0;
+    this.lastWet = -99;
     this.gravX = 0;
     this.lagQ = [];
     this.launchLock = 0;
@@ -1043,7 +1051,7 @@ export class GameScene extends Phaser.Scene {
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
       toss: null, eatX: null, eatSpeed: 0, growX: null, growSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
-      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false, cvx: 0, cvy: 0, push: 0, magnet: false,
+      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false, cvx: 0, cvy: 0, push: 0, magnet: false, zapFx: null,
     };
     g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
     g.cy = ((Math.min(...tiles.map((v) => v.ty)) + Math.max(...tiles.map((v) => v.ty)) + 1) / 2) * TILE;
@@ -1124,7 +1132,7 @@ export class GameScene extends Phaser.Scene {
       const deep = def.tint ?? 0x3aa6d8;
       for (const v of tiles) {
         const top = !own.has((v.ty - 1) * 1000 + v.tx);
-        gfx.fillStyle(deep, top ? 0.42 : 0.5).fillRect(v.tx * TILE, v.ty * TILE + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
+        gfx.fillStyle(deep, top ? 0.5 : 0.6).fillRect(v.tx * TILE, v.ty * TILE + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
         if (top) {
           gfx.fillStyle(0xe6fbff, 0.85).fillRect(v.tx * TILE, v.ty * TILE + 5, TILE, 3);
           gfx.fillStyle(0xe6fbff, 0.7).fillCircle(v.tx * TILE + 10, v.ty * TILE + 6, 3).fillCircle(v.tx * TILE + 30, v.ty * TILE + 6, 3);
@@ -1137,6 +1145,16 @@ export class GameScene extends Phaser.Scene {
         }
       }
       container.addAt(gfx, 0);
+      if (def.zap) {
+        // electrified water: yellow sparks while it is live
+        const z = this.add.graphics().setVisible(false);
+        for (const v of tiles) {
+          z.fillStyle(0xfff27a, 0.55).fillRect(v.tx * TILE, v.ty * TILE, TILE, TILE);
+          z.lineStyle(3, 0xffffff, 0.9).beginPath().moveTo(v.tx * TILE + 8, v.ty * TILE + 10).lineTo(v.tx * TILE + 20, v.ty * TILE + 22).lineTo(v.tx * TILE + 14, v.ty * TILE + 24).lineTo(v.tx * TILE + 30, v.ty * TILE + 34).strokePath();
+        }
+        container.add(z);
+        g.zapFx = z;
+      }
     } else if (t === 'H') {
       container.setDepth(4);
       const h = new Hero(this, g.cx, (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE);
@@ -1282,21 +1300,33 @@ export class GameScene extends Phaser.Scene {
   private updateWater(): void {
     const b = this.pbody;
     const cx = b.center.x, cy = b.center.y, hy = b.top + 4;
-    let inW = false, head = false;
+    let inW = false, head = false, surf = false, zapped = false;
     let cur: [number, number] = [0, 0];
     for (const g of this.groups.values()) {
       if (g.def.tile !== '~' || !g.visible) continue;
       for (const t of g.tiles) {
         const x = t.tx * TILE + g.ox, y = t.ty * TILE + g.oy;
         if (cx >= x && cx < x + TILE) {
-          if (cy >= y && cy < y + TILE) { inW = true; if (g.def.current) cur = g.def.current; }
+          if (cy >= y && cy < y + TILE) {
+            inW = true;
+            if (g.def.zap) zapped = true;
+            if (g.def.current) cur = g.def.current;
+            // near the surface (no water above this tile, centre in its top part): a stroke jumps out
+            if (!g.tiles.some((u) => u.tx === t.tx && u.ty === t.ty - 1) && cy - y < 30) surf = true;
+          }
           if (hy >= y && hy < y + TILE) head = true;
         }
       }
     }
-    if (inW && !this.inWater) { this.sfx('land'); this.emitDust.emitParticleAt(cx, cy, 6); }
+    if (inW && !this.inWater && this.levelTick - this.lastWet > 12) {
+      // the splash: diving in takes most of your speed up or down
+      this.sfx('land');
+      this.emitDust.emitParticleAt(cx, cy, 6);
+      b.setVelocityY(b.velocity.y * 0.3);
+    }
+    if (zapped) { this.kill('zap'); return; }
     this.inWater = inW;
-    this.headUnder = head;
+    this.headUnder = head && !surf;
     this.current = cur;
     if (this.strokeT > 0) this.strokeT--;
     if (head) {
@@ -1312,10 +1342,13 @@ export class GameScene extends Phaser.Scene {
     let vx = b.velocity.x;
     let vy = b.velocity.y;
     const wet = this.inWater;
-    if (wet && jumpPressed) {
+    if (wet) this.lastWet = this.levelTick;
+    // just bobbed out of the surface: a jump still pushes off the water (like coyote time at a ledge)
+    const bob = !wet && !this.grounded && this.levelTick - this.lastWet <= 12;
+    if ((wet || bob) && jumpPressed) {
       // a swim stroke (any time, not only on the ground); with the head above the surface: jump out
       if (this.strokeT === 0) {
-        vy = this.headUnder ? -WATER.stroke : -PHYS.jumpVel * 0.85;
+        vy = this.headUnder && !bob ? -WATER.stroke : -PHYS.jumpVel * 0.85;
         this.strokeT = WATER.strokeGap;
         this.hero.jump();
         this.sfx('jump');
@@ -1374,8 +1407,9 @@ export class GameScene extends Phaser.Scene {
     }
     if (vy * g >= 0) this.jumping = false;
     const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale * (wet ? WATER.gravity : 1);
-    vy += g * PHYS.gravity * mul * DT;
-    if (wet) vy += this.current[1] * DT;
+    // a vertical current (a stream, a waterfall) carries the swimmer at its own speed
+    if (wet && this.current[1] !== 0) vy = approach(vy, this.current[1], Math.max(1500, Math.abs(this.current[1]) * 4) * DT);
+    else vy += g * PHYS.gravity * mul * DT;
     const fallCap = wet ? WATER.maxFall + Math.max(0, this.current[1]) * 0.4 : PHYS.maxFall;
     if (vy * g > fallCap) vy = fallCap * g;
     b.setVelocity(vx, vy);
@@ -2472,6 +2506,16 @@ export class GameScene extends Phaser.Scene {
     this.emitDust.emitParticleAt(b.center.x, this.gdir > 0 ? b.bottom : b.top, n);
   }
 
+  private renderZap(): void {
+    for (const g of this.groups.values()) {
+      if (!g.def.zap) continue;
+      const on = g.visible;
+      g.container.setAlpha(on ? 0.75 + 0.25 * Math.sin(this.tick * 0.9) : 1);
+      for (const o of g.container.list) if (o instanceof Phaser.GameObjects.Image) o.setTint(on ? 0xfff27a : 0xffffff);
+      if (g.zapFx) g.zapFx.setVisible(on);
+    }
+  }
+
   private renderAir(): void {
     if (!this.airGfx || !this.airGfx.active) this.airGfx = this.track(this.add.graphics().setDepth(7));
     const g = this.airGfx;
@@ -2488,6 +2532,7 @@ export class GameScene extends Phaser.Scene {
 
   private render(dt: number): void {
     this.renderAir();
+    this.renderZap();
     if (!this.pbody) return;
     const b = this.pbody;
     if (this.state !== 'won') {
@@ -2628,6 +2673,7 @@ export class GameScene extends Phaser.Scene {
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
       trolls: [...this.trollsFired], checkpoint: this.cpIdx >= 0, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
+      air: this.air, wet: this.inWater, headUnder: this.headUnder,
       hudDeaths: this.deathText.text, ctrlMode: this.ctrlMode, gScale: this.gScale, camFrozen: this.camFrozen, camFlip: this.camFlip,
       camZoom: this.camZoomMul, hintUsed: this.hintUsed, hint: this.hintShown ? this.hintShown.text : '',
       g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])),

@@ -7,8 +7,8 @@
 | Cover portrait (800×1200) | `cover-800x1200.png` |
 | Cover square (800×800) | `cover-800x800.png` |
 | Icon (512×512) | `icon-512x512.png` |
-| Trailer landscape (1920×1080) | `trailer-1920x1080.mp4` (20 s) |
-| Trailer portrait (1080×1920) | `trailer-1080x1920.mp4` (20 s) |
+| Trailer landscape (1920×1080) | `trailer-1920x1080.mp4` (20 s, level 12: crates) |
+| Trailer portrait (1080×1920) | `trailer-1080x1920.mp4` (20 s, level 13: water) |
 
 ## Name
 

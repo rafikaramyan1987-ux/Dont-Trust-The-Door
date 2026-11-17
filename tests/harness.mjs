@@ -59,10 +59,13 @@ export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks 
     let total = 0;
     outer: for (const [keys, until] of plan) {
       const cond = typeof until === 'number' ? null : new Function('s', `return (${until});`);
+      // "R+J?<condition>": hold R, and J while the condition holds (e.g. swim strokes whenever you sink)
+      const jk = keys.includes('+J?') ? new Function('s', `return (${keys.split('+J?')[1]});`) : null;
       let n = 0;
       for (;;) {
         if (typeof until === 'number' ? n >= until : cond(s)) break;
-        T.sim(keys, 1); push(keys); n++; total++;
+        const k = jk ? keys.split('+J?')[0] + (jk(s) ? 'J' : '') : keys;
+        T.sim(k, 1); push(k); n++; total++;
         s = T.state();
         if (s.state !== 'play') break outer;
         if (total > maxTicks) break outer;

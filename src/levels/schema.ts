@@ -92,6 +92,8 @@ export interface GroupDef {
   crate?: boolean | 'still';
   /** Water (tile '~'): a current that pushes the swimmer (px/s, [x, y]). */
   current?: [number, number];
+  /** Water: electrified (it kills) while it is visible; pair it with calm water shown in between. */
+  zap?: boolean;
   /** Crates: where the crate can come to rest (tile offsets) – world states for the soft-lock analyzer. */
   rest?: [number, number][];
 }
