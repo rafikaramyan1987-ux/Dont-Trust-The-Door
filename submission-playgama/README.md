@@ -13,9 +13,9 @@ All three covers are frames of real play (traps of level 11) rendered natively a
 
 Don't Trust the Door
 
-## Description (340 characters)
+## Description (364 characters)
 
-A troll platformer where the level betrays you. Floors sink, coins bite, springs lie, the camera cheats and the EXIT runs away. Every trap is fair the second time: spot the trick, remember it and outsmart the level. Hand-made levels full of buttons that lie and doors you should never trust, one hint per level, checkpoints and 8 languages.
+A troll platformer where the level betrays you. Floors sink, coins bite, springs lie, the camera cheats and the EXIT runs away. Every trap is fair the second time: spot the trick, remember it and outsmart the level. 13 hand-made levels with 122 traps: buttons that lie, crates you can't trust, water that won't let go. One hint per level, checkpoints, 8 languages.
 
 ## How to play
 

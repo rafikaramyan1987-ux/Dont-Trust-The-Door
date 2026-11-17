@@ -1128,23 +1128,33 @@ export class GameScene extends Phaser.Scene {
       // water: a translucent body with a wavy surface where no water is above (drawn over the hero)
       container.setDepth(4.6);
       const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
-      const gfx = this.add.graphics();
-      const deep = def.tint ?? 0x3aa6d8;
-      for (const v of tiles) {
-        const top = !own.has((v.ty - 1) * 1000 + v.tx);
-        gfx.fillStyle(deep, top ? 0.5 : 0.6).fillRect(v.tx * TILE, v.ty * TILE + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
-        if (top) {
-          gfx.fillStyle(0xe6fbff, 0.85).fillRect(v.tx * TILE, v.ty * TILE + 5, TILE, 3);
-          gfx.fillStyle(0xe6fbff, 0.7).fillCircle(v.tx * TILE + 10, v.ty * TILE + 6, 3).fillCircle(v.tx * TILE + 30, v.ty * TILE + 6, 3);
+      // drawn once into a texture (a live Graphics object would be re-tessellated every frame)
+      const x0 = Math.min(...tiles.map((v) => v.tx)) * TILE, y0 = Math.min(...tiles.map((v) => v.ty)) * TILE;
+      const x1 = (Math.max(...tiles.map((v) => v.tx)) + 1) * TILE, y1 = (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE;
+      const wkey = `water-${this.lvl.id}-${id}`;
+      if (!this.textures.exists(wkey)) {
+        const gfx = this.make.graphics({ x: 0, y: 0 }, false);
+        const deep = def.tint ?? 0x3aa6d8;
+        for (const v of tiles) {
+          const top = !own.has((v.ty - 1) * 1000 + v.tx);
+          const px = v.tx * TILE - x0, py = v.ty * TILE - y0;
+          gfx.fillStyle(deep, top ? 0.5 : 0.6).fillRect(px, py + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
+          if (top) {
+            gfx.fillStyle(0xe6fbff, 0.85).fillRect(px, py + 5, TILE, 3);
+            gfx.fillStyle(0xe6fbff, 0.7).fillCircle(px + 10, py + 6, 3).fillCircle(px + 30, py + 6, 3);
+          }
         }
-        if (def.current && (v.tx + v.ty) % 2 === 0) {
-          const a = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + TILE / 2, 'chevron').setScale(1 / RES).setAlpha(0.45);
-          a.setRotation(Math.atan2(def.current[1], def.current[0]));
-          container.add(a);
-          this.tweens.add({ targets: a, x: a.x + Math.cos(a.rotation) * 12, y: a.y + Math.sin(a.rotation) * 12, alpha: 0.1, duration: 600, repeat: -1 });
-        }
+        gfx.generateTexture(wkey, x1 - x0, y1 - y0);
+        gfx.destroy();
       }
-      container.addAt(gfx, 0);
+      container.addAt(this.add.image(x0, y0, wkey).setOrigin(0), 0);
+      if (def.current) for (const v of tiles) {
+        if ((v.tx + v.ty) % 2 !== 0) continue;
+        const a = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + TILE / 2, 'chevron').setScale(1 / RES).setAlpha(0.45);
+        a.setRotation(Math.atan2(def.current[1], def.current[0]));
+        container.add(a);
+        this.tweens.add({ targets: a, x: a.x + Math.cos(a.rotation) * 12, y: a.y + Math.sin(a.rotation) * 12, alpha: 0.1, duration: 600, repeat: -1 });
+      }
       if (def.zap) {
         // electrified water: yellow sparks while it is live
         const z = this.add.graphics().setVisible(false);

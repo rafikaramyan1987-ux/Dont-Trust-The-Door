@@ -366,20 +366,25 @@ shown as bubbles, `current`, electrified `zap` water).
 - **`npm run test:portals`** – every portal build in a real browser with a mocked SDK (and the web build
   with none): see [Portal builds](#portal-builds).
 
-Latest run: **179/179 checks passed**.
+Latest full run: **238/239 checks passed** – the one failure is the ≥ 50 fps check, which this
+sandbox (headless Chromium, software WebGL, no GPU) misses for every level, the old ones included (~40 fps); on CI it is
+reported but not enforced.
 
 | Level | Width | Bot win from start | from checkpoints | Real time on a 640×360 phone |
 |---|---|---|---|---|
-| 1 | 236 | 33.2 s | 22 / 7.9 s | 34.5 s |
-| 2 | 284 | 39.4 s | 25.6 / 11.4 s | 41.1 s |
-| 3 | 275 | 40 s | 24.9 / 10.5 s | 41.4 s |
-| 4 | 260 | 39.1 s | 24.8 / 11 s | 43.9 s |
-| 5 | 299 | 42 s | 28.1 / 10 s | 45.2 s |
-| 6 | 243 | 32.6 s | 21.3 / 9.3 s | 35.6 s |
-| 7 | 250 | 37.1 s | 23.8 / 5.8 s | 39.7 s |
-| 8 | 406 | 54.3 s | 38 / 21.8 / 5.3 s | 58 s |
-| 9 | 429 | 59.2 s | 42.3 / 24.6 / 6.9 s | 62.5 s |
-| 10 | 402 | 61.6 s | 46.6 / 23.2 / 7.1 s | 64.1 s |
+| 1 | 236 | 33.2 s | 22 / 7.9 s | 35.1 s |
+| 2 | 284 | 39.4 s | 25.6 / 11.4 s | 41.5 s |
+| 3 | 275 | 40 s | 24.9 / 10.5 s | 41.7 s |
+| 4 | 260 | 39.1 s | 24.8 / 11 s | 44.2 s |
+| 5 | 299 | 42 s | 28.1 / 10 s | 45.5 s |
+| 6 | 243 | 32.6 s | 21.3 / 9.3 s | 35.9 s |
+| 7 | 250 | 37.1 s | 23.8 / 5.8 s | 39.8 s |
+| 8 | 406 | 54.3 s | 38 / 21.8 / 5.3 s | 58.7 s |
+| 9 | 429 | 59.2 s | 42.3 / 24.6 / 6.9 s | 62.8 s |
+| 10 | 402 | 61.6 s | 46.6 / 23.2 / 7.1 s | 64.4 s |
+| 11 | 462 | 70.4 s | 49 / 33.1 / 10.8 s | 72.5 s |
+| 12 | 532 | 106.7 s | 83.3 / 63.3 / 28.7 s | 109.7 s |
+| 13 | 614 | 102.7 s | 81.9 / 52.5 / 32.9 / 8.9 s | 105.6 s |
 
 ## Portal builds
 
