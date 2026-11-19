@@ -24,6 +24,8 @@
 // can come to rest (`rest`, tile offsets); every one of those is a world state. Water: every water tile is a place
 // to be (you swim up and down), and deep water can drown you (a death).
 
+import { extFor } from './softlock-ext.mjs';
+
 const ROWS = 18;
 const SOLID = '#';
 const isGroup = (ch) => (ch >= 'a' && ch <= 'z' && ch !== 'o' && ch !== 'v') || (ch >= 'A' && ch <= 'Z' && !'PDFCH'.includes(ch)) || (ch >= '0' && ch <= '9');
@@ -107,6 +109,9 @@ function groupStates(level) {
   }
   // platforms that move by themselves
   for (const [g, d] of Object.entries(level.groups || {})) {
+    // level extensions: their own world states
+    const ex = extFor(d);
+    if (ex?.alts) for (const v of ex.alts(d, groups[g] ?? [])) add(g, v);
     // crates: the places the level says they can come to rest (pushed to a wall, onto a plate, down a shaft …)
     if (d.crate === true) for (const [dx, dy] of d.rest ?? []) add(g, { dx, dy, present: true });
     if (d.orbit) for (let k = 0; k < 8; k++) {
@@ -137,8 +142,9 @@ function buildGrid(level, W, groups, cfg) {
     const d = level.groups[g];
     const c = cfg[g] ?? { dx: 0, dy: 0, present: !d.hidden };
     if (!c.present) continue;
-    const isBlock = (d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick);
-    const isDeadly = (SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop);
+    const ex = extFor(d)?.cell?.(d);
+    const isBlock = ex?.solid ?? ((d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick));
+    const isDeadly = ex?.deadly ?? ((SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop));
     for (const [x0, y0] of cells) {
       const x = x0 + Math.round(c.dx), y = y0 + Math.round(c.dy);
       if (x < 0 || x >= W || y < 0 || y >= ROWS) continue;
