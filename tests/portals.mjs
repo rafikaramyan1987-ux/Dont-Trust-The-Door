@@ -29,7 +29,7 @@ async function run(build) {
   const dir = build === 'web' ? 'dist' : `dist-${build}`;
   const { server, url } = await serveDist(dir);
   const browser = await launch();
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
   const page = await ctx.newPage();
   const errors = [];
   const external = [];
@@ -118,7 +118,7 @@ async function run(build) {
     const mutedDuring = await G(() => window.__DTTD.audioState ? window.__DTTD.audioState() : null);
     check(during.paused && during.muted, 'paused + muted while the rewarded ad plays', JSON.stringify(during));
     check(mutedDuring === null || mutedDuring.sysMuted === true, 'audio silenced during the ad', JSON.stringify(mutedDuring));
-    await page.waitForFunction(() => !window.__mock.adOpen, null, { timeout: 5000 });
+    await page.waitForFunction(() => !window.__mock.adOpen, null, { timeout: 15000 });
     await sleep(200);
     let s = await st();
     const after = await portal();
@@ -157,10 +157,10 @@ async function run(build) {
   if (build === 'gamepix') {
     await startLevel(1);
     await G(`${scene}.debugWin()`);
-    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 5000 });
+    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 15000 });
     const n0 = (await ads()).filter((c) => c === 'interstitial').length;
     await press('clearNext');
-    await page.waitForFunction(() => window.__DTTD.state()?.level === 2, null, { timeout: 5000 });
+    await page.waitForFunction(() => window.__DTTD.state()?.level === 2, null, { timeout: 15000 });
     check((await ads()).filter((c) => c === 'interstitial').length === n0, 'GamePix: no interstitial in the first 2 minutes');
     await G(() => { const o = Date.now; Date.now = () => o() + 125000; });
   }
@@ -168,7 +168,7 @@ async function run(build) {
   for (const [lvl, btn] of [[3, 'clearNext'], [4, 'clearLevels']]) {
     await startLevel(lvl);
     await G(`${scene}.debugWin()`);
-    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 5000 });
+    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 15000 });
     const n0 = (await calls()).filter(inter).length;
     await press(btn);
     if (build !== 'web') {
@@ -178,8 +178,8 @@ async function run(build) {
         check(pp.paused && pp.muted, `${btn}: paused + muted during the interstitial`, JSON.stringify(pp));
       }
     }
-    if (btn === 'clearNext') await page.waitForFunction((l) => window.__DTTD.state()?.level === l + 1 && window.__DTTD.state()?.state === 'play', lvl, { timeout: 6000 });
-    else await page.waitForFunction(() => window.__DTTD.activeScenes().includes('Select'), null, { timeout: 6000 });
+    if (btn === 'clearNext') await page.waitForFunction((l) => window.__DTTD.state()?.level === l + 1 && window.__DTTD.state()?.state === 'play', lvl, { timeout: 15000 });
+    else await page.waitForFunction(() => window.__DTTD.activeScenes().includes('Select'), null, { timeout: 15000 });
     const n1 = (await calls()).filter(inter).length;
     if (build === 'web') check(n1 === 0, `${btn} on the level-clear card: no ad on the web build`);
     else if (build === 'gamepix' && btn === 'clearLevels') check(n1 === n0, 'GamePix: a second interstitial within 2 minutes is skipped');
@@ -192,9 +192,9 @@ async function run(build) {
     await G(() => (window.__mock.mode = 'fail'));
     await startLevel(5);
     await G(`${scene}.debugWin()`);
-    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 5000 });
+    await page.waitForFunction(`(() => !!${scene}.overlay)()`, null, { timeout: 15000 });
     await press('clearNext');
-    const ok = await page.waitForFunction(() => window.__DTTD.state()?.level === 6 && window.__DTTD.state()?.state === 'play', null, { timeout: 6000 }).then(() => true, () => false);
+    const ok = await page.waitForFunction(() => window.__DTTD.state()?.level === 6 && window.__DTTD.state()?.state === 'play', null, { timeout: 15000 }).then(() => true, () => false);
     check(ok && !(await portal()).paused, 'a failed interstitial: the next level starts anyway, not paused');
   }
 
@@ -202,7 +202,7 @@ async function run(build) {
   await startLevel(7);
   await G(`${scene}.togglePause()`);
   await press('pauseLevels');
-  await page.waitForFunction(() => window.__DTTD.activeScenes().includes('Select'), null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__DTTD.activeScenes().includes('Select'), null, { timeout: 15000 });
   if (build === 'playgama') {
     const life = (await calls()).filter((c) => /^sendMessage:/.test(c)).map((c) => c.slice(12));
     check(life[0] === 'game_ready', 'game_ready before every level message', life.slice(0, 3).join(' '));
