@@ -172,11 +172,11 @@ export const PALETTES: Palette[] = [
     hex: { bg: 0xcfe6ff, accent: 0xff8a3d, ui: 0x2b2d42 },
   },
   {
-    name: 'Construction Site',
-    bgTop: '#ffe3a3', bgBottom: '#fff7dc', dot: 'rgba(140,100,10,0.13)',
-    block: '#c47a3a', blockLight: '#d99a5e', blockDark: '#9e5c25',
-    top: '#ffcc33', topLight: '#ffe48a', outline: OUT, accent: '#2f7de1',
-    hex: { bg: 0xffe3a3, accent: 0x2f7de1, ui: 0x2b2d42 },
+    name: 'Haunted Manor',
+    bgTop: '#2e3350', bgBottom: '#6a6f99', dot: 'rgba(220,230,255,0.08)',
+    block: '#6e5a7e', blockLight: '#8a76a0', blockDark: '#4e3e5e',
+    top: '#9ee6c0', topLight: '#d2fbe6', outline: OUT, accent: '#ffb347',
+    hex: { bg: 0x2e3350, accent: 0xffb347, ui: 0x2b2d42 },
   },
   {
     name: 'Fireworks Night',
