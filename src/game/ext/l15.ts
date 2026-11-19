@@ -45,7 +45,7 @@ function ray(s: Scene, x: number, y: number, a: number, len: number): [number, n
   for (; d < len; d += 4) {
     const px = x + dx * d, py = y + dy * d;
     if (py < -40 || py > 18 * T + 40) break;
-    if (s.staticSolid.has(Math.floor(py / T) * 1000 + Math.floor(px / T))) break;
+    if (s.staticSolid.has(Math.floor(py / T) * 10000 + Math.floor(px / T))) break;
   }
   return [x + dx * d, y + dy * d];
 }

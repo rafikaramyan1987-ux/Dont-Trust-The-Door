@@ -1,6 +1,6 @@
 name: CI
 
-# Static checks, then the self-test split into a matrix (one job per 5 levels, plus the level-independent checks),
+# Static checks, then the self-test split into a matrix (one job per 5 short levels, one per long level from 14 on, plus the level-independent checks),
 # each job well under 60 minutes, and the portal builds: zips, their checks, the Playgama QA Tool harness and the
 # mocked-SDK tests. `npm test` still runs everything in one go locally.
 on:
@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ['--levels 1-5', '--levels 6-10', '--levels 11-15', '--levels 16-20', '--general']
+        shard: ['--levels 1-5', '--levels 6-10', '--levels 11-13', '--levels 14-15', '--levels 16', '--levels 17', '--levels 18', '--levels 19', '--levels 20', '--general']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

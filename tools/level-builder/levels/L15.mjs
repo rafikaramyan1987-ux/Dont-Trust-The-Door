@@ -325,7 +325,7 @@ export default {
     [flat(1), pit(3, 3, 1), isle(3, 2, 1), pit(4, 2, -2), up(2, 2), down(2, 3)],
     [thorns(2, 2), up(1, 2), isle(3, 2, 1), pit(3, 2, -1), spikes(4, 2, -1)],
     [roof(4), flat(1), pit(3, 2), block(2, 1, 2), isle(3, 2, 1), down(1, 2), spikes(3, 2)],
-    [up(2, 2), pit(3, 1, 1), down(3, 4), spikes(4, 2), isle(3, 2, 2), pit(2, 2, -2)],
+    [up(2, 2), pit(3, 1, 1), down(2, 3), spikes(4, 2), isle(3, 3, 2), pit(2, 2, -3)],
     [isle(3, 2), isle(3, 3, 1), isle(4, 2, -1), pit(4, 3), thorns(2, 2)],
     [spikes(3, 2, 1), up(2, 2), pit(3, 2, -1), spikes(3, 2, -2), pillars(3, 1, [0, 1]), down(1, 2)],
     [thorns(3, 2), isle(3, 2, 2), isle(2, 3, 1), pit(4, 2, -2), spikes(2, 2, -1)],

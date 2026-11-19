@@ -259,7 +259,7 @@ function colourOf(s: Scene, h: Held): string {
 
 function solidAt(s: Scene, x: number, y: number): boolean {
   const tx = Math.floor(x / T), ty = Math.floor(y / T);
-  if (s.staticSolid.has(ty * 1000 + tx)) return true;
+  if (s.staticSolid.has(ty * 10000 + tx)) return true;
   for (const g of s.groups.values()) {
     if (!g.visible || !g.solid || g.state === 'gone' || kind(g) === 'key') continue;
     for (const t of g.tiles) if (t.tx * T + g.ox <= x && x < t.tx * T + g.ox + T && t.ty * T + g.oy <= y && y < t.ty * T + g.oy + T) return true;
@@ -435,7 +435,7 @@ const l14: Ext = {
       d.vy = Math.min(12, d.vy + 0.5);
       for (let n = 0; n < Math.ceil(d.vy); n++) {
         const p = keyPos(d.g);
-        if (s.staticSolid.has(Math.floor((p.y + 12) / T) * 1000 + Math.floor(p.x / T))) { d.still = true; break; }
+        if (s.staticSolid.has(Math.floor((p.y + 12) / T) * 10000 + Math.floor(p.x / T))) { d.still = true; break; }
         d.g.oy += Math.min(1, d.vy - n);
       }
       if (keyPos(d.g).y > 18 * T + 60) { d.g.visible = false; d.g.container.setVisible(false); d.still = true; }
@@ -520,7 +520,7 @@ const l14: Ext = {
         const dx = hx - bt.x, dy = hy - bt.y, d = Math.hypot(dx, dy) || 1;
         bt.x += (dx / d) * 7;
         bt.y += (dy / d) * 7;
-        if (s.staticSolid.has(Math.floor(bt.y / T) * 1000 + Math.floor(bt.x / T))) {
+        if (s.staticSolid.has(Math.floor(bt.y / T) * 10000 + Math.floor(bt.x / T))) {
           bt.state = 'gone';
           bt.img.setVisible(false);
           s.emitDeath.emitParticleAt(bt.x, bt.y, 12);

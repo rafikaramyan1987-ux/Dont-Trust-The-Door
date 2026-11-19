@@ -294,7 +294,7 @@ function blocked(s: Scene, r: R): boolean {
   const x0 = Math.floor((r.x + 0.5) / T), x1 = Math.floor((r.x + r.w - 0.5) / T);
   const y0 = Math.floor((r.y + 0.5) / T), y1 = Math.floor((r.y + r.h - 0.5) / T);
   if (r.x < 0 || r.x + r.w > s.worldW) return true;
-  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (ty >= 0 && s.staticSolid.has(ty * 1000 + tx)) return true;
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (ty >= 0 && s.staticSolid.has(ty * 10000 + tx)) return true;
   for (const g of s.groups.values()) {
     if (!g.solid || !g.visible || g.state === 'gone') continue;
     for (const z of g.bodies) {
