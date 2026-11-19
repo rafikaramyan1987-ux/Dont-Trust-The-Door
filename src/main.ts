@@ -7,6 +7,8 @@ import { Input } from './input';
 import { installTestHooks } from './testHooks';
 import { Save } from './save';
 import { setLang, detectLang, t } from './i18n';
+import { Portal, PortalState } from './platform';
+import { Audio } from './audio';
 import '@fontsource/nunito/latin-800.css';
 import '@fontsource/nunito/latin-900.css';
 import '@fontsource/nunito/latin-ext-800.css';
@@ -14,12 +16,17 @@ import '@fontsource/nunito/latin-ext-900.css';
 import '@fontsource/nunito/cyrillic-800.css';
 import '@fontsource/nunito/cyrillic-900.css';
 
-setLang(Save.get().lang ?? detectLang(navigator.languages ?? [navigator.language]));
-document.title = t('ui.title');
-const rot = document.getElementById('rotate');
-if (rot) {
-  rot.querySelector('[data-t="rotate"]')!.textContent = t('ui.rotate');
-  rot.querySelector('[data-t="rotateSub"]')!.textContent = t('ui.rotateSub');
+/** The language: the player's own 🌐 choice, else the portal's (if supported), else the browser's, else English. */
+function applyLanguage(): void {
+  const browser = navigator.languages ?? [navigator.language];
+  const portal = Portal.locale();
+  setLang(Save.get().lang ?? detectLang(portal ? [portal, ...browser] : browser));
+  document.title = t('ui.title');
+  const rot = document.getElementById('rotate');
+  if (rot) {
+    rot.querySelector('[data-t="rotate"]')!.textContent = t('ui.rotate');
+    rot.querySelector('[data-t="rotateSub"]')!.textContent = t('ui.rotateSub');
+  }
 }
 
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -52,8 +59,26 @@ function start(): void {
   if (Input.isTest) installTestHooks(game);
 }
 
-// Text is drawn into canvases, so the bundled font must be loaded before the first scene.
-Promise.race([
-  Promise.all(['800', '900'].map((w) => document.fonts.load(`${w} 20px "Nunito"`, 'AaĞşİıЖжçÉ'))),
-  new Promise((r) => setTimeout(r, 3000)),
-]).catch(() => undefined).then(start);
+async function boot(): Promise<void> {
+  Portal.onPause = (p) => (PortalState.paused = p);
+  Portal.onMute = (m) => {
+    PortalState.muted = m;
+    Audio.setSysMuted(m);
+  };
+  await Portal.init().catch(() => undefined);
+  Portal.loading(20);
+  // the portal's store holds the save in those builds (same key, same format)
+  const kv = Portal.storage();
+  if (kv) Save.use(kv);
+  applyLanguage();
+  Portal.loading(50);
+  // Text is drawn into canvases, so the bundled font must be loaded before the first scene.
+  await Promise.race([
+    Promise.all(['800', '900'].map((w) => document.fonts.load(`${w} 20px "Nunito"`, 'AaĞşİıЖжçÉ'))),
+    new Promise((r) => setTimeout(r, 3000)),
+  ]).catch(() => undefined);
+  Portal.loading(90);
+  start();
+}
+
+void boot();

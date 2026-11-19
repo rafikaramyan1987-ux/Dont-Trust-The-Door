@@ -1,11 +1,14 @@
 // Static checks for every level data file. Run with `npm run test:levels`.
 //  • map: 18 equal rows, legal characters, one P, one D, groups/triggers valid
-//  • size: every level at least twice as wide as before the rework
-//  • traps: exactly 8 per level (10 in levels 8-10), 86 in total, every trap TYPE unique
+//  • size: levels 1-10 at least twice as wide as before the rework; levels 11-30 exactly as in the length table
+//    (each 15% longer than the one before, ±1%)
+//  • traps: exactly 8 per level (10 in levels 8-10, N in level N ≥ 11), every trap TYPE unique
 //    across the game, every trap with a hint (an existing text key) and a machine-readable
 //    solution, and its highlight ("danger") exactly equal to its trigger area
-//  • checkpoints: one after every three traps
-//  • no copy-pasted terrain: no 12-column stretch with ≥4 non-trivial columns appears twice
+//  • checkpoints: one after every three traps; from level 11 also never more than 200 tiles apart
+//    (start → first, between two, last → EXIT)
+//  • no copy-pasted or mirrored terrain: no 12-column stretch with ≥4 non-trivial columns appears twice, nor
+//    flipped left-right
 //    (plain ground, void, cave and bare spike-pit columns are trivial; groups compare by kind)
 //  • no text in the levels except the level-1 move/jump instructions
 //  • no soft-locks (static analysis, tests/softlock.mjs)
@@ -21,7 +24,10 @@ const en = JSON.parse(readFileSync(join(ROOT, 'src', 'i18n', 'en.json'), 'utf8')
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
 /** Widths before the rework (tiles); every level must be at least twice as wide now. */
 export const OLD_WIDTHS = { 1: 118, 2: 142, 3: 135, 4: 129, 5: 149, 6: 121, 7: 125, 8: 203, 9: 214, 10: 201 };
-const TRAPS = (id) => (id >= 8 ? 10 : 8);
+/** Levels 11-30: tiles (each 15% longer than the one before, ±1%) — the length table. */
+export const TABLE = { 11: 462, 12: 531, 13: 611, 14: 703, 15: 808, 16: 929, 17: 1068, 18: 1228, 19: 1412, 20: 1624, 21: 1868, 22: 2148, 23: 2470, 24: 2840, 25: 3266, 26: 3756, 27: 4319, 28: 4967, 29: 5712, 30: 6569 };
+export const TRAPS = (id) => (id >= 11 ? id : id >= 8 ? 10 : 8);
+const MAX_CP_GAP = 200;
 const BASIC = new Set(['.', '#', '^', 'v', '<', '>', '=', 'o', '*', 'P', 'D', 'F', 'C']);
 /** A group's kind: its tile plus the properties that make it a different block (tint, ice …). */
 const groupKind = (d) => (d ? [d.tile, ...Object.entries(d).filter(([k]) => !['tile', 'troll', 'cover'].includes(k)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).sort()].join(';') : '?');
@@ -40,7 +46,16 @@ files.forEach((f, idx) => {
   for (const q of L.deathQuips ?? []) if (!en[q]) fail(f, `death quip key "${q}" missing in en.json`);
   if (L.map.length !== 18) fail(f, `map has ${L.map.length} rows, expected 18`);
   const W = L.map[0].length;
-  if (W < 2 * OLD_WIDTHS[L.id]) fail(f, `map is ${W} tiles wide – must be at least 2 × ${OLD_WIDTHS[L.id]} = ${2 * OLD_WIDTHS[L.id]}`);
+  if (L.id <= 10 && W < 2 * OLD_WIDTHS[L.id]) fail(f, `map is ${W} tiles wide – must be at least 2 × ${OLD_WIDTHS[L.id]} = ${2 * OLD_WIDTHS[L.id]}`);
+  if (L.id > 10) {
+    const want = TABLE[L.id];
+    if (!want) fail(f, `level ${L.id} is not in the length table`);
+    else if (Math.abs(W - want) > want * 0.01) fail(f, `map is ${W} tiles wide – the length table says ${want} (±1%)`);
+    if (L.id > 11 && levels[L.id - 2]) {
+      const prev = levels[L.id - 2].map[0].length;
+      if (Math.abs(W / prev - 1.15) > 0.025) fail(f, `${W} tiles is ${((W / prev - 1) * 100).toFixed(1)}% longer than level ${L.id - 1} (${prev}); must be 15% (±1% of the table)`);
+    }
+  }
   const count = { P: 0, D: 0, C: 0 };
   const used = new Set();
   const cps = [];
@@ -92,13 +107,28 @@ files.forEach((f, idx) => {
     if (missing.length || extra.length) fail(f, `trap "${t.name}": highlight ≠ trigger area (missing ${missing.slice(0, 4)} extra ${extra.slice(0, 4)})`);
     if (t.x !== Math.min(...[...got].map((k) => +k.split(',')[0]))) fail(f, `trap "${t.name}": x does not match its danger area`);
   }
-  // one checkpoint after every three traps
+  // one checkpoint after every three traps (levels 11+: plus extra ones so they are never > 200 tiles apart)
   const wantCps = Math.floor((trolls.length - 1) / 3);
-  if (cps.length !== wantCps) fail(f, `${cps.length} checkpoints, expected ${wantCps} (one after every 3 traps)`);
-  cps.sort((a, b) => a - b).forEach((cx, i) => {
-    const before = trolls.filter((t) => t.x + t.w <= cx).length;
-    if (before !== 3 * (i + 1)) fail(f, `checkpoint ${i + 1} at x=${cx} has ${before} traps before it, expected ${3 * (i + 1)}`);
-  });
+  cps.sort((a, b) => a - b);
+  if (L.id <= 10) {
+    if (cps.length !== wantCps) fail(f, `${cps.length} checkpoints, expected ${wantCps} (one after every 3 traps)`);
+    cps.forEach((cx, i) => {
+      const before = trolls.filter((t) => t.x + t.w <= cx).length;
+      if (before !== 3 * (i + 1)) fail(f, `checkpoint ${i + 1} at x=${cx} has ${before} traps before it, expected ${3 * (i + 1)}`);
+    });
+  } else {
+    for (let k = 1; k <= wantCps; k++) {
+      const a = trolls[3 * k - 1], z = trolls[3 * k];
+      if (!cps.some((cx) => cx >= a.x + a.w && cx < z.x)) fail(f, `no checkpoint between trap ${3 * k} ("${a.name}") and trap ${3 * k + 1} ("${z.name}")`);
+    }
+    const startX = L.map.findIndex(() => false);
+    const px = L.map.map((r) => r.indexOf('P')).find((x) => x >= 0);
+    const dx = L.map.map((r) => r.indexOf('D')).find((x) => x >= 0);
+    void startX;
+    const marks = [px, ...cps, dx];
+    for (let i = 1; i < marks.length; i++) if (marks[i] - marks[i - 1] > MAX_CP_GAP) fail(f, `${marks[i] - marks[i - 1]} tiles between ${i === 1 ? 'the start' : `checkpoint ${i - 1}`} (x=${marks[i - 1]}) and ${i === marks.length - 1 ? 'the EXIT' : `checkpoint ${i}`} (x=${marks[i]}): at most ${MAX_CP_GAP}`);
+    for (const cx of cps) if (trolls.some((t) => cx > t.x && cx < t.x + t.w)) fail(f, `checkpoint at x=${cx} stands inside a trap`);
+  }
   // text in the level: only the level-1 tutorial (move / jump), as keys
   if ((L.hints ?? []).length && L.id !== 1) fail(f, 'text hints are only allowed in level 1 (control instructions)');
   for (const h of L.hints ?? []) { if (!en[h.text]) fail(f, `tutorial text "${h.text}" is not a key`); if ('afterDeaths' in h) fail(f, 'hints after deaths are not allowed'); }
@@ -107,7 +137,8 @@ files.forEach((f, idx) => {
   const spots = [...new Set(sl.stuck.map((p) => `col ${p.x} row ${p.y}`))];
   if (spots.length) fail(f, `soft-lock at ${spots.slice(0, 8).join('; ')}${spots.length > 8 ? ` … (${spots.length})` : ''} [states: ${[...new Set(sl.stuck.map((p) => p.state))].slice(0, 6).join(', ')}]`);
   if (sl.maxX < W - 2) fail(f, `soft-lock analysis only covered columns up to ${sl.maxX} of ${W}`);
-  console.log(`✓ ${f}  ${W} tiles (≥ ${2 * OLD_WIDTHS[L.id]}), ${trolls.length} traps, ${cps.length} checkpoints, no soft-locks (${sl.states} world states, ${sl.reached} reachable spots)`);
+  const size = L.id <= 10 ? `≥ ${2 * OLD_WIDTHS[L.id]}` : `table ${TABLE[L.id]} ±1%`;
+  console.log(`✓ ${f}  ${W} tiles (${size}), ${trolls.length} traps, ${cps.length} checkpoints, no soft-locks (${sl.states} world states, ${sl.reached} reachable spots)`);
 });
 
 // no copy-pasted terrain: every 12-column window with ≥4 non-trivial columns is unique
@@ -131,11 +162,16 @@ for (const L of levels) {
   }
 }
 const seen = new Map();
+/** a window flipped left-right: columns reversed, and directional tiles turned round */
+const FLIP = { '<': '>', '>': '<' };
+const mirror = (win) => [...win].reverse().map((c) => c.replace(/[<>]/g, (ch) => FLIP[ch]));
 let windows = 0;
 for (const L of levels) {
   const c = canon(L);
   const cols = Array.from({ length: L.map[0].length }, (_, x) => c(x));
   const owner = (x) => L.trolls.find((t) => x >= t.x && x < t.x + t.w)?.id ?? null;
+  // a symmetric trap (a pool with a bank on each side) mirrors itself: allowed when both windows overlap that trap
+  const traps = (x) => new Set(L.trolls.filter((t) => t.x < x + 12 && t.x + t.w > x).map((t) => t.id));
   for (let x = 0; x + 12 <= cols.length; x++) {
     const win = cols.slice(x, x + 12);
     if (win.filter((s) => !PLAIN.has(s)).length < 4) continue;
@@ -145,9 +181,17 @@ for (const L of levels) {
     const prev = seen.get(k);
     if (prev && !(prev.id === L.id && o && prev.o === o)) fail(`level ${L.id}`, `terrain at x=${x}-${x + 11} is a copy of level ${prev.id} x=${prev.x}-${prev.x + 11}`);
     else if (!prev) seen.set(k, { id: L.id, x, o });
+    // mirrored (flipped left-right) copies of new terrain: level 11+ windows against everything
+    if (L.id > 10) {
+      const m = mirror(win).join('|');
+      const pm = m !== k && seen.get(m);
+      const shared = pm && pm.id === L.id && [...traps(x)].some((id) => traps(pm.x).has(id));
+      if (pm && !(pm.id === L.id && o && pm.o === o) && !shared) fail(`level ${L.id}`, `terrain at x=${x}-${x + 11} is a mirrored copy of level ${pm.id} x=${pm.x}-${pm.x + 11}`);
+    }
   }
 }
-if (totalTraps !== 86) fail('levels', `${totalTraps} traps in total, expected 86`);
+const wantTotal = levels.reduce((n, L) => n + TRAPS(L.id), 0);
+if (totalTraps !== wantTotal) fail('levels', `${totalTraps} traps in total, expected ${wantTotal}`);
 const worlds = levels.map((L) => L.world);
 if (new Set(worlds).size !== worlds.length) fail('levels', 'palettes must differ per level');
 console.log(`\n${totalTraps} traps, ${Object.keys(typeOwner).length} distinct trap types; ${windows} terrain windows compared, no copies.`);

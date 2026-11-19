@@ -1,5 +1,7 @@
 // Progress persistence. Every storage access is wrapped: private mode,
-// blocked storage or quota errors must never break the game.
+// blocked storage or quota errors must never break the game. The store is localStorage, or the portal's own storage
+// (Playgama Bridge storage, CrazyGames data module) in those builds: the same key and the same JSON format.
+import type { KeyValueStore } from './platform/types';
 
 const KEY = 'dttd-save-v1';
 
@@ -19,19 +21,27 @@ function fresh(): SaveData {
   return { unlocked: 1, totalDeaths: 0, levelDeaths: {}, completed: {}, muted: false, tutorialSeen: false, lang: null };
 }
 
+let store: KeyValueStore | null = null;
 let data: SaveData = load();
+
+function backend(): KeyValueStore {
+  return store ?? window.localStorage;
+}
 
 function load(): SaveData {
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = backend().getItem(KEY);
     if (!raw) return fresh();
     const parsed = JSON.parse(raw) as Partial<SaveData>;
     const base = fresh();
+    const completed = typeof parsed.completed === 'object' && parsed.completed ? parsed.completed : base.completed;
+    // older saves capped `unlocked` at the old level count (10): finishing a level always unlocks the next one
+    const best = Math.max(0, ...Object.keys(completed).filter((k) => completed[k]).map(Number).filter((n) => n > 0));
     return {
-      unlocked: Math.max(1, Number(parsed.unlocked) || 1),
+      unlocked: Math.max(1, Number(parsed.unlocked) || 1, best + 1),
       totalDeaths: Math.max(0, Number(parsed.totalDeaths) || 0),
       levelDeaths: typeof parsed.levelDeaths === 'object' && parsed.levelDeaths ? parsed.levelDeaths : base.levelDeaths,
-      completed: typeof parsed.completed === 'object' && parsed.completed ? parsed.completed : base.completed,
+      completed,
       muted: !!parsed.muted,
       tutorialSeen: !!parsed.tutorialSeen,
       lang: typeof parsed.lang === 'string' ? parsed.lang : null,
@@ -43,13 +53,22 @@ function load(): SaveData {
 
 function persist(): void {
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(data));
+    backend().setItem(KEY, JSON.stringify(data));
   } catch {
     /* storage unavailable: keep playing with in-memory progress */
   }
 }
 
 export const Save = {
+  /** switch to the portal's store (or back to localStorage with null) and reload from it */
+  use(kv: KeyValueStore | null): void {
+    store = kv;
+    data = load();
+  },
+  /** reload from the store (tests) */
+  reload(): void {
+    data = load();
+  },
   get(): Readonly<SaveData> {
     return data;
   },

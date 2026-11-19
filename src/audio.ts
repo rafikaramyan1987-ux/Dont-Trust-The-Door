@@ -202,6 +202,8 @@ class AudioEngine {
   sfxBus: GainNode | null = null;
   musicBus: GainNode | null = null;
   muted = Save.get().muted;
+  /** the portal silences the game (ad, portal pause, hidden page, the portal's sound switch): never saved */
+  sysMuted = false;
   private musicOn = false;
   private nextStep = 0;
   private nextTime = 0;
@@ -218,7 +220,7 @@ class AudioEngine {
         if (!AC) return;
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = this.muted ? 0 : 0.8;
+        this.master.gain.value = this.muted || this.sysMuted ? 0 : 0.8;
         this.master.connect(this.ctx.destination);
         this.sfxBus = this.ctx.createGain();
         this.sfxBus.connect(this.master);
@@ -235,7 +237,7 @@ class AudioEngine {
 
   sfx(name: SfxName): void {
     if (this.onSfx) this.onSfx(name);
-    if (!this.ctx || !this.sfxBus || this.muted || this.ctx.state !== 'running') return;
+    if (!this.ctx || !this.sfxBus || this.muted || this.sysMuted || this.ctx.state !== 'running') return;
     try {
       playSfxAt(this.ctx, this.sfxBus, name, this.ctx.currentTime + 0.005);
     } catch {
@@ -246,7 +248,17 @@ class AudioEngine {
   setMuted(m: boolean): void {
     this.muted = m;
     Save.setMuted(m);
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.02);
+    this.applyGain();
+  }
+
+  /** portal mute on / off; when it ends, the player's own sound setting applies again */
+  setSysMuted(m: boolean): void {
+    this.sysMuted = m;
+    this.applyGain();
+  }
+
+  private applyGain(): void {
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.muted || this.sysMuted ? 0 : 0.8, this.ctx.currentTime, 0.02);
   }
 
   toggleMute(): boolean {
@@ -279,7 +291,7 @@ class AudioEngine {
     if (!ctx || !this.musicBus) return;
     if (ctx.currentTime > this.nextTime + 1) this.nextTime = ctx.currentTime + 0.05; // tab was asleep
     while (this.nextTime < ctx.currentTime + 0.25) {
-      if (!this.muted) scheduleMusicStep(ctx, this.musicBus, this.nextStep, this.nextTime);
+      if (!this.muted && !this.sysMuted) scheduleMusicStep(ctx, this.musicBus, this.nextStep, this.nextTime);
       this.nextStep = (this.nextStep + 1) % LOOP_STEPS;
       this.nextTime += EIGHTH;
     }

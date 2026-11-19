@@ -18,7 +18,13 @@
 // fall to the ceiling and back), platforms on orbits, followers and pulleys (sampled
 // positions), teleporting platforms (cumulative moves), portal doors (an edge to their
 // exit) and kicking doors (a wall). Moves that return on their own are transient and add no
-// world state.
+// world state. Level 11+: buttons (their triggers are ordinary touch triggers), bridges that build themselves
+// (`grow`: the finished bridge is a world state), belts that turn round (`belt`: a belt is walkable floor either way;
+// against it you hop, with it you are carried into the trap's pit, a death). Crates: each crate lists where it
+// can come to rest (`rest`, tile offsets); every one of those is a world state. Water: every water tile is a place
+// to be (you swim up and down), and deep water can drown you (a death).
+
+import { extFor } from './softlock-ext.mjs';
 
 const ROWS = 18;
 const SOLID = '#';
@@ -87,6 +93,7 @@ function groupStates(level) {
     if ('hide' in a) add(a.hide, { dx: 0, dy: 0, present: false });
     if ('show' in a) add(a.show, { dx: 0, dy: 0, present: true });
     if ('pop' in a) add(a.pop, { dx: 0, dy: 0, present: true });
+    if ('grow' in a) add(a.grow, { dx: 0, dy: 0, present: true }); // a bridge building itself: its finished state
     if ('eat' in a || 'toss' in a) add(a.eat ?? a.toss, { dx: 0, dy: 0, present: false });
     if ('activate' in a) add(a.activate, { dx: 0, dy: 0, present: false });
     if ('move' in a) {
@@ -102,6 +109,11 @@ function groupStates(level) {
   }
   // platforms that move by themselves
   for (const [g, d] of Object.entries(level.groups || {})) {
+    // level extensions: their own world states
+    const ex = extFor(d, level.id);
+    if (ex?.alts) for (const v of ex.alts(d, groups[g] ?? [])) add(g, v);
+    // crates: the places the level says they can come to rest (pushed to a wall, onto a plate, down a shaft …)
+    if (d.crate === true) for (const [dx, dy] of d.rest ?? []) add(g, { dx, dy, present: true });
     if (d.orbit) for (let k = 0; k < 8; k++) {
       const ph = d.orbit.phase ?? 0, a = ph + (k * Math.PI) / 4;
       add(g, { dx: d.orbit.r * (Math.cos(a) - Math.cos(ph)), dy: d.orbit.r * (Math.sin(a) - Math.sin(ph)), present: true });
@@ -120,6 +132,7 @@ function buildGrid(level, W, groups, cfg) {
   const grid = { warps: [] };
   const solid = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   const deadly = Array.from({ length: ROWS }, () => new Array(W).fill(false));
+  const water = Array.from({ length: ROWS }, () => new Array(W).fill(false));
   level.map.forEach((row, y) => [...row].forEach((ch, x) => {
     if (ch === SOLID) solid[y][x] = true;
     else if (SPIKES.has(ch)) deadly[y][x] = true;
@@ -129,8 +142,9 @@ function buildGrid(level, W, groups, cfg) {
     const d = level.groups[g];
     const c = cfg[g] ?? { dx: 0, dy: 0, present: !d.hidden };
     if (!c.present) continue;
-    const isBlock = (d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick);
-    const isDeadly = (SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop);
+    const ex = extFor(d, level.id)?.cell?.(d);
+    const isBlock = ex?.solid ?? ((d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick));
+    const isDeadly = ex?.deadly ?? ((SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop));
     for (const [x0, y0] of cells) {
       const x = x0 + Math.round(c.dx), y = y0 + Math.round(c.dy);
       if (x < 0 || x >= W || y < 0 || y >= ROWS) continue;
@@ -138,24 +152,34 @@ function buildGrid(level, W, groups, cfg) {
       if (d.tile === 'F' && d.warp) grid.warps.push({ x, y, to: d.warp });
       if (isDeadly) deadly[y][x] = true;
       if (d.tile === '=' && !d.dud) pads.push({ x, y, side: d.launch ? d.launch[0] : 0 });
+      if (d.tile === '~') water[y][x] = true;
     }
   }
   // fake EXITs bite
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'F') { deadly[y][x] = true; if (y > 0) deadly[y - 1][x] = true; } }));
-  return { solid, deadly, pads, warps: grid.warps };
+  // a turret's lane (its row, leftwards over its range, up to the first solid tile) is deadly: it fires while you
+  // are anywhere its activation zone covers (crates block it, but a crate lane is never a dead end)
+  for (const [g, cells] of Object.entries(groups)) {
+    const d = level.groups[g];
+    if (!d.turret) continue;
+    for (const [x0, y] of cells) for (let x = x0 - 1; x >= Math.max(0, x0 - d.turret.range) && !solid[y][x]; x--) deadly[y][x] = true;
+  }
+  return { solid, deadly, water, pads, warps: grid.warps };
 }
 
 /** Movement helpers for one world state. */
 function makeState(level, W, grid, reg) {
-  const { solid, deadly } = grid;
+  const { solid, deadly, water } = grid;
+  const Wt = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < W && water[y][x];
   const S = (x, y) => x < 0 || x >= W || (y >= 0 && y < ROWS && solid[y][x]);
   const free = (x, y) => x >= 0 && x < W && (y < 0 || y >= ROWS || !solid[y][x]);
   const D = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < W && deadly[y][x];
   const g = (x) => reg.grav[Math.max(0, Math.min(W - 1, x))];
   // under the ceiling in a "jump flips gravity" strip you can stand upside down
   const onCeil = (x, y) => reg.flipjump[Math.max(0, Math.min(W - 1, x))] && g(x) > 0 && S(x, y - 1) && !S(x, y + 1);
-  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y));
-  const key = (x, y) => y * 1000 + x;
+  // swimming: every water tile is a place to be (you float, stroke up, sink down)
+  const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y) || Wt(x, y));
+  const key = (x, y) => y * 10000 + x;
 
   // falling from (x, y) with the column's gravity (optionally drifting sideways)
   function fall(x, y, drift, gOverride) {
@@ -199,6 +223,16 @@ function makeState(level, W, grid, reg) {
       if (D(nx, y)) { out.push(DEATH); continue; }
       if (stand(nx, y)) out.push(key(nx, y));
       else out.push(...fall(nx, y, model === 'reach' ? M.drift : 0));
+    }
+    if (Wt(x, y)) {
+      // swim up / down; deep under water you can also run out of air (a death)
+      for (const ny of [y - 1, y + 1]) {
+        if (!free(x, ny)) continue;
+        if (D(x, ny)) out.push(DEATH);
+        else if (stand(x, ny)) out.push(key(x, ny));
+        else out.push(...fall(x, ny, 0));
+      }
+      if (Wt(x, y - 1)) out.push(DEATH);
     }
     // "jump flips gravity": fall to the other side (ceiling ↔ floor), drifting while you run
     if (reg.flipjump[x]) out.push(...fall(x, y, model === 'reach' ? 4 : 0, -gg));
@@ -278,7 +312,7 @@ export function analyzeLevel(level) {
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'D') door = [x, y]; }));
   for (const t of level.triggers || []) for (const a of t.do) if ('doorRun' in a) { const p = a.doorRun[a.doorRun.length - 1]; door = [Math.round(p[0]), Math.round(p[1])]; }
   const goalCells = new Set();
-  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 0; dy++) goalCells.add((door[1] + dy) * 1000 + door[0] + dx);
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 0; dy++) goalCells.add((door[1] + dy) * 10000 + door[0] + dx);
   const starts = [];
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'P' || ch === 'C') starts.push([x, y]); }));
   // world states: initial, all fired, each group's alternatives alone
@@ -294,18 +328,18 @@ export function analyzeLevel(level) {
   states.forEach((st, i) => altState.set(st.name, i));
   // group membership of every tile in the initial layout (to detect riding)
   const tileGroup = new Map();
-  for (const [gname, cells] of Object.entries(groups)) for (const [x, y] of cells) tileGroup.set(y * 1000 + x, gname);
+  for (const [gname, cells] of Object.entries(groups)) for (const [x, y] of cells) tileGroup.set(y * 10000 + x, gname);
 
   // 1) over-approximated reachability over the union of world states
   const seen = new Set();
   const q = [];
   const push = (si, k) => { if (k < 0) return; const id = si * 1e6 + k; if (!seen.has(id)) { seen.add(id); q.push(id); } };
-  for (const [sx, sy] of starts) states.forEach((st, si) => { for (const k of [st.h.key(sx, sy), ...st.h.fall(sx, sy, 0)]) if (k >= 0 && st.h.stand(k % 1000, Math.floor(k / 1000))) push(si, k); });
+  for (const [sx, sy] of starts) states.forEach((st, si) => { for (const k of [st.h.key(sx, sy), ...st.h.fall(sx, sy, 0)]) if (k >= 0 && st.h.stand(k % 10000, Math.floor(k / 10000))) push(si, k); });
   while (q.length) {
     const id = q.pop();
     const si = Math.floor(id / 1e6), k = id % 1e6;
     const st = states[si];
-    const x = k % 1000, y = Math.floor(k / 1000);
+    const x = k % 10000, y = Math.floor(k / 10000);
     for (const n of st.h.moves(x, y, 'reach')) push(si, n);
     // the world may change around the hero (any trap fires)
     states.forEach((o, oi) => {
@@ -314,7 +348,7 @@ export function analyzeLevel(level) {
       else for (const n of o.h.fall(x, y, 0)) push(oi, n);
     });
     // riding a moving group: carried to its moved position
-    const under = (y + st.h.g(x)) * 1000 + x;
+    const under = (y + st.h.g(x)) * 10000 + x;
     const gname = tileGroup.get(under);
     if (gname && alts[gname]) alts[gname].forEach((v, i) => {
       const oi = altState.get(`${gname}#${i}`);
@@ -331,7 +365,7 @@ export function analyzeLevel(level) {
   let reached = 0, minMaxX = Infinity;
   states.forEach((st, si) => {
     const succ = new Map();
-    for (const k of st.h.nodes) succ.set(k, st.h.moves(k % 1000, Math.floor(k / 1000), 'escape'));
+    for (const k of st.h.nodes) succ.set(k, st.h.moves(k % 10000, Math.floor(k / 10000), 'escape'));
     const ok = new Set();
     for (const k of st.h.nodes) if (goalCells.has(k) || succ.get(k).some((n) => n === DEATH)) ok.add(k);
     for (let changed = true; changed;) {
@@ -339,8 +373,8 @@ export function analyzeLevel(level) {
       for (const k of st.h.nodes) if (!ok.has(k) && succ.get(k).some((n) => n >= 0 && ok.has(n))) { ok.add(k); changed = true; }
     }
     const mine = [...seen].filter((id) => Math.floor(id / 1e6) === si).map((id) => id % 1e6);
-    for (const k of mine) if (!ok.has(k)) stuck.push({ state: st.name, x: k % 1000, y: Math.floor(k / 1000) });
-    const maxX = mine.length ? Math.max(...mine.map((k) => k % 1000)) : -1;
+    for (const k of mine) if (!ok.has(k)) stuck.push({ state: st.name, x: k % 10000, y: Math.floor(k / 10000) });
+    const maxX = mine.length ? Math.max(...mine.map((k) => k % 10000)) : -1;
     reached += mine.length;
     minMaxX = Math.min(minMaxX, maxX);
     perState.push({ state: st.name, maxX, reached: mine.length });

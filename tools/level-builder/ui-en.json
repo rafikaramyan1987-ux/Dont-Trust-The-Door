@@ -64,5 +64,8 @@
   "say.hop": "hop!",
   "say.split": "split!",
   "say.wait": "wait for me!",
-  "say.flipover": "flip!"
+  "say.flipover": "flip!",
+  "ui.hintAd": "Watch an ad for the hint",
+  "ui.adNone": "No ad available right now, try again later",
+  "ui.finalSub": "All {n} levels done. No door will ever fool you again… probably."
 }

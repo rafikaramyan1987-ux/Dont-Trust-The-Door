@@ -10,6 +10,8 @@ import { Audio } from '../audio';
 import { Save } from '../save';
 import { drawTerrain, addTerrainTexture, RES } from '../art';
 import { Input } from '../input';
+import { LEVELS } from '../levels';
+import { Portal } from '../platform';
 
 export class TitleScene extends Phaser.Scene {
   private bg!: Phaser.GameObjects.Image;
@@ -79,12 +81,13 @@ export class TitleScene extends Phaser.Scene {
     this.events.once('shutdown', () => { this.scale.off('resize', this.relayout, this); off(); });
     this.input.on('pointerdown', () => Audio.unlock());
     Audio.startMusic();
+    Portal.gameReady();
   }
 
   private play(): void {
     Audio.unlock();
     const s = Save.get();
-    const next = Math.min(s.unlocked, 10);
+    const next = Math.min(s.unlocked, LEVELS.length);
     this.scene.start('Game', { level: next });
   }
 
