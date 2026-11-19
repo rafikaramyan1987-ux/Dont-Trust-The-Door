@@ -18,6 +18,8 @@ export const SOFTLOCK_EXT = [
       return out;
     },
   },
+  // level 20: the arrow plank tips over (gone); signs, guides and party guests drawn on '?' tiles are nothing to stand on
+  { kinds: ['l20seesaw'], alts: () => [{ dx: 0, dy: 0, present: false }] },
 ];
 
 export function extFor(def) {
