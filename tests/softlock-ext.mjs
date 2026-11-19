@@ -24,6 +24,8 @@ export const SOFTLOCK_EXT = [
   // a key, a padlock hanging from a post, a magpie or a bat take no room
   { kinds: ['lock', 'key'], alts: () => [{ dx: 0, dy: 0, present: false }] },
   { kinds: ['bridge'], alts: () => [{ dx: 0, dy: 0, present: true }] },
+  // level 19: walls / bridge planks that explosions blow away, and the giant (solid) bomb that pops
+  { kinds: ['fw-wall', 'fw-bomb'], alts: () => [{ dx: 0, dy: 0, present: false }] },
 ];
 
 export function extFor(def) {
