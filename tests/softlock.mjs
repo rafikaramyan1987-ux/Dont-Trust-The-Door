@@ -179,7 +179,7 @@ function makeState(level, W, grid, reg) {
   const onCeil = (x, y) => reg.flipjump[Math.max(0, Math.min(W - 1, x))] && g(x) > 0 && S(x, y - 1) && !S(x, y + 1);
   // swimming: every water tile is a place to be (you float, stroke up, sink down)
   const stand = (x, y) => y >= 0 && y < ROWS && free(x, y) && !D(x, y) && (S(x, y + g(x)) || onCeil(x, y) || Wt(x, y));
-  const key = (x, y) => y * 1000 + x;
+  const key = (x, y) => y * 10000 + x;
 
   // falling from (x, y) with the column's gravity (optionally drifting sideways)
   function fall(x, y, drift, gOverride) {
@@ -312,7 +312,7 @@ export function analyzeLevel(level) {
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'D') door = [x, y]; }));
   for (const t of level.triggers || []) for (const a of t.do) if ('doorRun' in a) { const p = a.doorRun[a.doorRun.length - 1]; door = [Math.round(p[0]), Math.round(p[1])]; }
   const goalCells = new Set();
-  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 0; dy++) goalCells.add((door[1] + dy) * 1000 + door[0] + dx);
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 0; dy++) goalCells.add((door[1] + dy) * 10000 + door[0] + dx);
   const starts = [];
   level.map.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'P' || ch === 'C') starts.push([x, y]); }));
   // world states: initial, all fired, each group's alternatives alone
@@ -328,18 +328,18 @@ export function analyzeLevel(level) {
   states.forEach((st, i) => altState.set(st.name, i));
   // group membership of every tile in the initial layout (to detect riding)
   const tileGroup = new Map();
-  for (const [gname, cells] of Object.entries(groups)) for (const [x, y] of cells) tileGroup.set(y * 1000 + x, gname);
+  for (const [gname, cells] of Object.entries(groups)) for (const [x, y] of cells) tileGroup.set(y * 10000 + x, gname);
 
   // 1) over-approximated reachability over the union of world states
   const seen = new Set();
   const q = [];
   const push = (si, k) => { if (k < 0) return; const id = si * 1e6 + k; if (!seen.has(id)) { seen.add(id); q.push(id); } };
-  for (const [sx, sy] of starts) states.forEach((st, si) => { for (const k of [st.h.key(sx, sy), ...st.h.fall(sx, sy, 0)]) if (k >= 0 && st.h.stand(k % 1000, Math.floor(k / 1000))) push(si, k); });
+  for (const [sx, sy] of starts) states.forEach((st, si) => { for (const k of [st.h.key(sx, sy), ...st.h.fall(sx, sy, 0)]) if (k >= 0 && st.h.stand(k % 10000, Math.floor(k / 10000))) push(si, k); });
   while (q.length) {
     const id = q.pop();
     const si = Math.floor(id / 1e6), k = id % 1e6;
     const st = states[si];
-    const x = k % 1000, y = Math.floor(k / 1000);
+    const x = k % 10000, y = Math.floor(k / 10000);
     for (const n of st.h.moves(x, y, 'reach')) push(si, n);
     // the world may change around the hero (any trap fires)
     states.forEach((o, oi) => {
@@ -348,7 +348,7 @@ export function analyzeLevel(level) {
       else for (const n of o.h.fall(x, y, 0)) push(oi, n);
     });
     // riding a moving group: carried to its moved position
-    const under = (y + st.h.g(x)) * 1000 + x;
+    const under = (y + st.h.g(x)) * 10000 + x;
     const gname = tileGroup.get(under);
     if (gname && alts[gname]) alts[gname].forEach((v, i) => {
       const oi = altState.get(`${gname}#${i}`);
@@ -365,7 +365,7 @@ export function analyzeLevel(level) {
   let reached = 0, minMaxX = Infinity;
   states.forEach((st, si) => {
     const succ = new Map();
-    for (const k of st.h.nodes) succ.set(k, st.h.moves(k % 1000, Math.floor(k / 1000), 'escape'));
+    for (const k of st.h.nodes) succ.set(k, st.h.moves(k % 10000, Math.floor(k / 10000), 'escape'));
     const ok = new Set();
     for (const k of st.h.nodes) if (goalCells.has(k) || succ.get(k).some((n) => n === DEATH)) ok.add(k);
     for (let changed = true; changed;) {
@@ -373,8 +373,8 @@ export function analyzeLevel(level) {
       for (const k of st.h.nodes) if (!ok.has(k) && succ.get(k).some((n) => n >= 0 && ok.has(n))) { ok.add(k); changed = true; }
     }
     const mine = [...seen].filter((id) => Math.floor(id / 1e6) === si).map((id) => id % 1e6);
-    for (const k of mine) if (!ok.has(k)) stuck.push({ state: st.name, x: k % 1000, y: Math.floor(k / 1000) });
-    const maxX = mine.length ? Math.max(...mine.map((k) => k % 1000)) : -1;
+    for (const k of mine) if (!ok.has(k)) stuck.push({ state: st.name, x: k % 10000, y: Math.floor(k / 10000) });
+    const maxX = mine.length ? Math.max(...mine.map((k) => k % 10000)) : -1;
     reached += mine.length;
     minMaxX = Math.min(minMaxX, maxX);
     perState.push({ state: st.name, maxX, reached: mine.length });
