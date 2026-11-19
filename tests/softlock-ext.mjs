@@ -6,6 +6,18 @@ export const SOFTLOCK_EXT = [
   // level 17 (src/game/ext/l17.ts): wind zones, balloons and the windmill only push / lift / sweep (no tiles of
   // their own); the floating thistles are spiked
   { kinds: ['wind', 'balloon', 'thistle', 'mill'], cell: (d) => ({ solid: false, deadly: d.ext.kind === 'thistle' }) },
+  // level 15 (src/game/ext/l15.ts): lasers are drawn by the extension and are no terrain ('?'); the solar lift rides
+  // up and down (every height it can stop at), the hard-light bridge is there once it has slid out
+  {
+    kinds: ['solar', 'blade'],
+    alts(def) {
+      const e = def.ext;
+      if (e.kind === 'blade') return [{ dx: 0, dy: 0, present: true }];
+      const out = [];
+      for (let dy = Math.round(e.minOy / 40); dy <= Math.round(e.maxOy / 40); dy++) if (dy) out.push({ dx: 0, dy, present: true });
+      return out;
+    },
+  },
 ];
 
 export function extFor(def) {
