@@ -41,6 +41,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: node tests/run-selftest.mjs ${{ matrix.shard }}
+      - if: matrix.shard == '--general'
+        run: node tests/hint-fit.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
