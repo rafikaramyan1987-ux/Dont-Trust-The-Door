@@ -20,7 +20,7 @@
  */
 
 /** H = a decoy hero sprite (no collision; the camera can follow it). */
-export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H' | '~';
+export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H' | '~' | '?';
 
 /** Is this map character a group id? */
 export function isGroupChar(ch: string): boolean {
@@ -94,6 +94,8 @@ export interface GroupDef {
   current?: [number, number];
   /** Water: electrified (it kills) while it is visible; pair it with calm water shown in between. */
   zap?: boolean;
+  /** A level extension's own settings for this group (src/game/ext): { kind: '…', … }. */
+  ext?: Record<string, unknown>;
   /** Crates: where the crate can come to rest (tile offsets) – world states for the soft-lock analyzer. */
   rest?: [number, number][];
 }
@@ -119,6 +121,8 @@ export interface TriggerWhen {
    *  condition (zone / touch) and, at the same time, this crate in crateZone (both on a fragile bridge). */
   crate?: string;
   crateZone?: Rect;
+  /** A level extension's condition (src/game/ext); together with zone / touch both must hold. */
+  ext?: Record<string, unknown>;
 }
 
 export type CtrlMode = 'normal' | 'flip' | 'nojump' | 'autorun' | 'lag' | 'hiccup' | 'superjump' | 'turbo' | 'frozen' | 'flipjump';
@@ -160,6 +164,9 @@ export type Action =
   | { grow: string; speed: number }
   /** A crate goes back to its drawn place (visible, at rest). */
   | { respawn: string }
+  /** A level extension's action (src/game/ext): ext = '<extension>.<verb>', g / g2 = groups it acts on (they are
+   *  highlighted with the trap), args = anything else it needs. */
+  | { ext: string; g?: string; g2?: string; args?: Record<string, unknown> }
   /** A magnet pulls a crate up (on) or lets it fall again (off). */
   | { magnet: string; on: boolean }
   /** A crate starts sliding at this speed (px/tick; it keeps it on ice). */

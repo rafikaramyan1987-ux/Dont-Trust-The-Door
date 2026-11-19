@@ -12,6 +12,8 @@ import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
 import { Portal, PortalState } from '../platform';
+import { EXTS } from '../game/ext';
+import type { MoveCtx } from '../game/ext/types';
 import { applyLayout, Layout } from '../layout';
 import { Button, label, panel, bubble, fitText } from '../ui';
 
@@ -137,6 +139,8 @@ export interface Snapshot {
   hudDeaths: string;
   ctrlMode: string;
   gScale: number;
+  /** fields the level extensions add */
+  ext: Record<string, unknown>;
   /** swimming: air left (ticks), in water, head under water */
   air: number;
   wet: boolean;
@@ -219,6 +223,8 @@ export class GameScene extends Phaser.Scene {
   private fired = new Set<string>();
   private hints: { obj: Phaser.GameObjects.Text; after: number }[] = [];
   private staticSolid = new Set<number>();
+  /** per-run state of the level extensions (src/game/ext) */
+  ext: Record<string, any> = {};
   /** the direction the hero is trying to move this tick (-1, 0, 1): crates are pushed by it */
   private inputDir = 0;
   /** swimming: in water this tick, the current there (px/s), air left (ticks), stroke cooldown */
@@ -793,6 +799,8 @@ export class GameScene extends Phaser.Scene {
 
   private buildLevel(): void {
     const L = this.lvl;
+    this.ext = {};
+    for (const e of EXTS) e.init?.(this);
     const map = L.map;
     const gdefs = L.groups ?? {};
     const groupTiles = new Map<string, { tx: number; ty: number }[]>();
@@ -1124,6 +1132,9 @@ export class GameScene extends Phaser.Scene {
       for (const v of tiles) this.addBall(v.tx, v.ty, g);
       if (def.frog) for (const b of this.balls) if (b.group === g) b.img.setTexture('frog');
       if (def.homing) for (const b of this.balls) if (b.group === g) b.img.setTexture('bird');
+    } else if (t === '?') {
+      // drawn and handled by a level extension only
+      container.setDepth(3);
     } else if (t === '~') {
       // water: a translucent body with a wavy surface where no water is above (drawn over the hero)
       container.setDepth(4.6);
@@ -1181,6 +1192,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     container.setVisible(g.visible);
+    for (const e of EXTS) e.group?.(this, g);
   }
 
   /** Animated chevrons on a conveyor belt. */
@@ -1284,6 +1296,7 @@ export class GameScene extends Phaser.Scene {
 
     this.controlPlayer(k, jumpPressed);
     this.updateGroups();
+    for (const e of EXTS) e.tick?.(this);
     // moving platforms carry the hero standing on them
     if (this.ride && this.ride.solid && this.ride.visible && (this.ride.dx || this.ride.dy)) {
       this.player.x += this.ride.dx;
@@ -1384,7 +1397,10 @@ export class GameScene extends Phaser.Scene {
     const bias = this.gravX + belt + (wet ? this.current[0] : 0);
     const grip = gr && this.ride?.def.ice ? 0.05 : 1;
     const maxRun = (mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun) * (wet ? WATER.run : 1);
-    const accMul = (mode === 'turbo' ? 2 : 1) * grip;
+    const m: MoveCtx = { dir, jumpPressed, grounded: gr, maxRun, accMul: (mode === 'turbo' ? 2 : 1) * grip, bias, jumpMul: 1, gravMul: 1, vx, vy, keys: k };
+    for (const e of EXTS) e.move?.(this, m);
+    ({ dir, jumpPressed, vx, vy } = m);
+    const accMul = m.accMul;
     if (mode === 'frozen') {
       jumpPressed = false; // no control at all, and you keep sliding
     } else if (this.launchLock > 0) {
@@ -1392,14 +1408,14 @@ export class GameScene extends Phaser.Scene {
     } else if (dir !== 0) {
       const turning = vx !== bias && Math.sign(vx - bias) !== dir;
       const a = gr ? (turning ? PHYS.groundDecel : PHYS.groundAccel) : PHYS.airAccel;
-      vx = approach(vx, dir * maxRun + bias, a * accMul * DT);
+      vx = approach(vx, dir * m.maxRun + m.bias, a * accMul * DT);
     } else {
-      vx = approach(vx, bias, (gr ? PHYS.groundDecel : PHYS.airDecel) * accMul * DT);
+      vx = approach(vx, m.bias, (gr ? PHYS.groundDecel : PHYS.airDecel) * accMul * DT);
     }
     if (jumpPressed) this.buffer = PHYS.bufferTicks;
     if (gr) this.coyote = PHYS.coyoteTicks;
     if (this.buffer > 0 && this.coyote > 0) {
-      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * g;
+      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * m.jumpMul * g;
       this.jumpedNow = true;
       this.jumping = true;
       this.coyote = 0;
@@ -1416,7 +1432,7 @@ export class GameScene extends Phaser.Scene {
       this.jumping = false;
     }
     if (vy * g >= 0) this.jumping = false;
-    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale * (wet ? WATER.gravity : 1);
+    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale * (wet ? WATER.gravity : 1) * m.gravMul;
     // a vertical current (a stream, a waterfall) carries the swimmer at its own speed
     if (wet && this.current[1] !== 0) vy = approach(vy, this.current[1], Math.max(1500, Math.abs(this.current[1]) * 4) * DT);
     else vy += g * PHYS.gravity * mul * DT;
@@ -1470,6 +1486,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkInteractions(): void {
+    for (const e of EXTS) { if (this.state !== 'play') return; e.interact?.(this); }
+    if (this.state !== 'play') return;
     const pr = this.playerRect(3);
     // spikes
     for (const s of this.spikes) {
@@ -1804,6 +1822,9 @@ export class GameScene extends Phaser.Scene {
         if (ok && w.grounded) ok = this.grounded;
         if (ok && w.landFaster !== undefined) ok = this.grounded && !this.wasGrounded && Math.abs(this.lastVy) >= w.landFaster;
       } else if (w.touch) ok = this.touchingGroup(w.touch, pr);
+      else if (w.ext) ok = true;
+      // a level extension's condition (alone, or on top of the zone / touch)
+      if (ok && w.ext) ok = EXTS.some((e) => e.when?.(this, w.ext as Record<string, any>) === true);
       // the hero's condition and, at the same time, a crate in its zone
       if (ok && w.crate && w.crateZone) ok = this.crateIn(w.crate, w.crateZone);
       if (!ok) continue;
@@ -1861,7 +1882,12 @@ export class GameScene extends Phaser.Scene {
   private runActions(actions: Action[], quiet = false): void {
     let trap = false;
     for (const a of actions) {
-      if ('fall' in a) {
+      if ('ext' in a) {
+        for (const e of EXTS) {
+          const r = e.action?.(this, a as Record<string, any>);
+          if (r) { if (r === 'trap') trap = true; break; }
+        }
+      } else if ('fall' in a) {
         const g = this.grp(a.fall);
         g.state = 'shaking';
         g.shakeT = a.shake ?? 6;
@@ -2541,6 +2567,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private render(dt: number): void {
+    for (const e of EXTS) e.render?.(this, dt);
     this.renderAir();
     this.renderZap();
     if (!this.pbody) return;
@@ -2684,6 +2711,7 @@ export class GameScene extends Phaser.Scene {
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
       trolls: [...this.trollsFired], checkpoint: this.cpIdx >= 0, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
       air: this.air, wet: this.inWater, headUnder: this.headUnder,
+      ext: Object.assign({}, ...EXTS.map((e) => e.snapshot?.(this) ?? {})),
       hudDeaths: this.deathText.text, ctrlMode: this.ctrlMode, gScale: this.gScale, camFrozen: this.camFrozen, camFlip: this.camFlip,
       camZoom: this.camZoomMul, hintUsed: this.hintUsed, hint: this.hintShown ? this.hintShown.text : '',
       g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])),
