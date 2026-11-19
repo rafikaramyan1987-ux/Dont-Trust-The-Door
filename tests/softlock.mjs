@@ -110,7 +110,7 @@ function groupStates(level) {
   // platforms that move by themselves
   for (const [g, d] of Object.entries(level.groups || {})) {
     // level extensions: their own world states
-    const ex = extFor(d);
+    const ex = extFor(d, level.id);
     if (ex?.alts) for (const v of ex.alts(d, groups[g] ?? [])) add(g, v);
     // crates: the places the level says they can come to rest (pushed to a wall, onto a plate, down a shaft …)
     if (d.crate === true) for (const [dx, dy] of d.rest ?? []) add(g, { dx, dy, present: true });
@@ -142,7 +142,7 @@ function buildGrid(level, W, groups, cfg) {
     const d = level.groups[g];
     const c = cfg[g] ?? { dx: 0, dy: 0, present: !d.hidden };
     if (!c.present) continue;
-    const ex = extFor(d)?.cell?.(d);
+    const ex = extFor(d, level.id)?.cell?.(d);
     const isBlock = ex?.solid ?? ((d.tile === '#' && !d.fake) || (d.tile === 'F' && !!d.kick));
     const isDeadly = ex?.deadly ?? ((SPIKES.has(d.tile) && !d.fake) || d.trapCoin || (d.tile === 'F' && !d.kick && !d.warp && !d.prop));
     for (const [x0, y0] of cells) {

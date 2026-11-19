@@ -207,7 +207,8 @@ export const L17: Ext = {
   },
   group(s, g) {
     const d = g.def.ext;
-    if (!d) return;
+    // only on level 17: level 16 also has groups of kind 'wind'
+    if (!d || s.lvl?.id !== 17) return;
     if (!['wind', 'balloon', 'thistle', 'mill'].includes(d.kind)) return;
     textures(s);
     const S = st(s);

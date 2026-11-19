@@ -1,15 +1,15 @@
 // Soft-lock analyzer support for the level extensions (src/game/ext): one entry per extension, by group ext.kind.
-// Each entry: { kinds: ['key', …], cell?(def) → { solid?, deadly? }, alts?(def, cells) → [{ dx, dy, present }] }.
+// Each entry: { level: N, kinds: ['key', …], cell?(def) → { solid?, deadly? }, alts?(def, cells) → [{ dx, dy, present }] }.
 //   cell: how one tile of such a group counts (default: as its `tile` says: '#' solid, spikes deadly, '?' nothing)
 //   alts: extra world states for such a group (where it can be, whether it is there)
 export const SOFTLOCK_EXT = [
   // level 17 (src/game/ext/l17.ts): wind zones, balloons and the windmill only push / lift / sweep (no tiles of
   // their own); the floating thistles are spiked
-  { kinds: ['wind', 'balloon', 'thistle', 'mill'], cell: (d) => ({ solid: false, deadly: d.ext.kind === 'thistle' }) },
+  { level: 17, kinds: ['wind', 'balloon', 'thistle', 'mill'], cell: (d) => ({ solid: false, deadly: d.ext.kind === 'thistle' }) },
   // level 15 (src/game/ext/l15.ts): lasers are drawn by the extension and are no terrain ('?'); the solar lift rides
   // up and down (every height it can stop at), the hard-light bridge is there once it has slid out
   {
-    kinds: ['solar', 'blade'],
+    level: 15, kinds: ['solar', 'blade'],
     alts(def) {
       const e = def.ext;
       if (e.kind === 'blade') return [{ dx: 0, dy: 0, present: true }];
@@ -19,16 +19,16 @@ export const SOFTLOCK_EXT = [
     },
   },
   // level 20: the arrow plank tips over (gone); signs, guides and party guests drawn on '?' tiles are nothing to stand on
-  { kinds: ['l20seesaw'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+  { level: 20, kinds: ['l20seesaw'], alts: () => [{ dx: 0, dy: 0, present: false }] },
   // level 14: locks open (their tiles go), lowered bridges appear, a key lying in a bridge can be picked up (it goes);
   // a key, a padlock hanging from a post, a magpie or a bat take no room
-  { kinds: ['lock', 'key'], alts: () => [{ dx: 0, dy: 0, present: false }] },
-  { kinds: ['bridge'], alts: () => [{ dx: 0, dy: 0, present: true }] },
+  { level: 14, kinds: ['lock', 'key'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+  { level: 14, kinds: ['bridge'], alts: () => [{ dx: 0, dy: 0, present: true }] },
   // level 19: walls / bridge planks that explosions blow away, and the giant (solid) bomb that pops
-  { kinds: ['fw-wall', 'fw-bomb'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+  { level: 19, kinds: ['fw-wall', 'fw-bomb'], alts: () => [{ dx: 0, dy: 0, present: false }] },
   // level 18 (src/game/ext/l18.ts): ghosts, planks that need your eyes, possessed furniture
   {
-    kinds: ['ghost', 'gaze', 'front', 'chair', 'key', 'candles', 'carrier', 'portrait', 'music', 'beam', 'shy', 'rug', 'lift', 'slamdoor', 'exitghost', 'mirror', 'cobweb'],
+    level: 18, kinds: ['ghost', 'gaze', 'front', 'chair', 'key', 'candles', 'carrier', 'portrait', 'music', 'beam', 'shy', 'rug', 'lift', 'slamdoor', 'exitghost', 'mirror', 'cobweb'],
     alts(def) {
       const e = def.ext;
       const out = [];
@@ -43,11 +43,23 @@ export const SOFTLOCK_EXT = [
         case 'lift': span(e.rise, (i) => ({ dx: 0, dy: -i, present: true })); break;
       }
       return out;
+  // level 16 (src/game/ext/l16.ts): sizes. The analyzer models the normal hero; mushrooms, arches, rings, puffballs,
+  // vents, wind and flytraps are no terrain; a half-height slab (tiny-only slot) counts as open; brambles say in `sl`
+  // whether they count as deadly. Cracked planks can be gone, lily pads / flower heads sunk, springs snapped.
+  {
+    level: 16, kinds: ['shroom', 'arch', 'ring', 'puff', 'slab', 'vent', 'wind', 'ray', 'bramble', 'flytrap', 'crack', 'lily', 'snap'],
+    cell: (def) => def.ext.sl ?? {},
+    alts: (def) => {
+      const k = def.ext.kind;
+      if (k === 'crack' || k === 'snap') return [{ dx: 0, dy: 0, present: false }];
+      if (k === 'lily') return [{ dx: 0, dy: def.ext.sink ?? 3, present: true }];
+      return [];
     },
   },
 ];
 
-export function extFor(def) {
+// kinds are per level (levels 16 and 17 both have 'wind', 14 and 18 both 'key', 15 and 18 both 'beam')
+export function extFor(def, levelId) {
   const kind = def?.ext?.kind;
-  return kind ? SOFTLOCK_EXT.find((e) => e.kinds.includes(kind)) : null;
+  return kind ? SOFTLOCK_EXT.find((e) => e.level === levelId && e.kinds.includes(kind)) ?? null : null;
 }
