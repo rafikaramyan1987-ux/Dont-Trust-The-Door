@@ -397,14 +397,14 @@ ready, level started / completed / failed, interstitial, rewarded, pause and mut
 | web (GitHub Pages) | `npm run build` | `dist/` | **none: no SDK, no ads, no network request** |
 | Playgama | `npm run submission:playgama` | `submission-playgama/dont-trust-the-door-playgama-v1.zip` | Bridge `https://bridge.playgama.com/v2/stable/playgama-bridge.js`, first script in `<head>`; `bridge.initialize()` runs before the game bundle; `playgama-bridge-config.json` beside `index.html` |
 | GamePix | `npm run submission:gamepix` | `submission-gamepix/dont-trust-the-door-gamepix-v1.zip` | SDK v3, `lifecycle: 'manual'`: loading 0–100, `loaded()`, `gameStart()` |
-| Y8 | `npm run submission:y8` | `submission-y8/dont-trust-the-door-y8-v1.zip` | minimal SDK 2.0 from Y8's CDN; IDs from `VITE_Y8_APP_ID` / `VITE_Y8_GAME_ID` |
+| Y8 | `npm run submission:y8` | `submission-y8/dont-trust-the-door-y8-v1.zip` | minimal SDK 2.0 from Y8's CDN; App ID `6aff479cc9841fd9d0e5db3e`, Game ID `294329` |
 | CrazyGames | `npm run submission:crazygames` | `submission-crazygames/dont-trust-the-door-crazygames-v1.zip` | SDK v3 |
 
 `npm run submission` builds and checks all four. Every zip has `index.html` at its root, relative paths only
 and no request except its own portal's SDK.
 
-**Y8 IDs:** the committed Y8 zip has no App ID / Game ID yet (the check says so). Create the game in Y8
-Studio, then rebuild: `VITE_Y8_APP_ID=<app id> VITE_Y8_GAME_ID=<game id> npm run submission:y8`.
+**Y8 IDs:** the game's public client IDs from the Y8 developer portal (App ID `6aff479cc9841fd9d0e5db3e`, Game ID
+`294329`) are built into the Y8 zip; `VITE_Y8_APP_ID` / `VITE_Y8_GAME_ID` can override them.
 
 **Language and saves:** the player's own 🌐 choice wins; otherwise the portal's language if the game has it,
 else the browser's, else English. Saves use the portal's storage where there is one (Playgama Bridge storage,

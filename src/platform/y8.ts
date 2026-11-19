@@ -1,8 +1,8 @@
 // Y8 minimal SDK 2.0 (https://docs.y8.com/sdk/intro/). Loaded only from Y8's CDN
 // (<script src="https://cdn.y8.com/minimal-sdk/2-0/y8.min.js" async> in <head>, Y8 build only). Initialised as the
 // portal snippet: a `y8sdk.ready` listener calls y8.sdk(), init(appConfig, adConfig) and onAuth(); emitReadyEvent()
-// covers an SDK that loaded first. The App ID / Game ID come from VITE_Y8_APP_ID / VITE_Y8_GAME_ID at build time:
-// without them the build plays without ads (scripts/y8/check.mjs says so).
+// covers an SDK that loaded first. The App ID / Game ID are the game's public IDs from the Y8 developer portal
+// (VITE_Y8_APP_ID / VITE_Y8_GAME_ID can override them at build time).
 // - interstitial: showAd({ type: 'next' }) on Next / Levels of the level-clear card; the SDK paces them
 // - rewarded: showAd({ type: 'reward' }); beforeReward → showAdFn(); the reward only after adViewed
 // - pause + mute in beforeAd, resume in afterAd; adBreakDone / .catch / timeout settle each request exactly once
@@ -10,8 +10,9 @@
 import { BasePlatform, type KeyValueStore, type Platform } from './types';
 
 export const Y8_SDK_URL = 'https://cdn.y8.com/minimal-sdk/2-0/y8.min.js';
-export const Y8_APP_ID: string = import.meta.env.VITE_Y8_APP_ID ?? '';
-export const Y8_GAME_ID: string = import.meta.env.VITE_Y8_GAME_ID ?? '';
+/** the game's public client IDs from the Y8 developer portal (VITE_Y8_APP_ID / VITE_Y8_GAME_ID override them) */
+export const Y8_APP_ID: string = import.meta.env.VITE_Y8_APP_ID || '6aff479cc9841fd9d0e5db3e';
+export const Y8_GAME_ID: string = import.meta.env.VITE_Y8_GAME_ID || '294329';
 
 interface Y8ShowAdOptions {
   type: 'start' | 'next' | 'reward';

@@ -1,8 +1,7 @@
 # Don't Trust the Door — Y8
 
-> **Owner to-do:** create the game in Y8 Studio, then rebuild with its IDs:
-> `VITE_Y8_APP_ID=<app id> VITE_Y8_GAME_ID=<game id> npm run submission:y8`. The committed zip has **no IDs yet**
-> (`scripts/y8/check.mjs` says so): it plays without ads until it is rebuilt with them.
+- **App ID:** `6aff479cc9841fd9d0e5db3e` · **Game ID:** `294329` (the game's public client IDs from the Y8 developer
+  portal, built into the zip: `src/platform/y8.ts`; `VITE_Y8_APP_ID` / `VITE_Y8_GAME_ID` can override them).
 
 | Y8 Studio tab → slot | File (in `submission-y8/`) |
 |---|---|

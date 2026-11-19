@@ -59,7 +59,7 @@ window.GamePix = {
 
   y8: `${COMMON}
 var sdk = {
-  init: function (app, adc) { log('init', { appId: app.appId, gameId: adc.gameId }); setTimeout(adc.onReady, 10); },
+  init: function (app, adc) { log('init', { appId: app.appId, autoLogin: app.autoLogin, gameId: adc.gameId, preloadAdBreaks: adc.preloadAdBreaks, sound: adc.sound }); setTimeout(adc.onReady, 10); },
   onAuth: function () { log('onAuth'); },
   showAd: function (o) {
     log('showAd', o.type);

@@ -12,7 +12,6 @@
 //     pause + mute the game
 //   - web: no SDK, no ads, the hint is free, no request at all outside the build
 // Usage: node tests/portals.mjs [web|playgama|gamepix|y8|crazygames ...]   (builds must exist: dist/, dist-<portal>/)
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { launch, serveDist, ROOT } from './harness.mjs';
 import { MOCKS } from './portal-mocks.mjs';
@@ -27,13 +26,7 @@ let failed = 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function run(build) {
-  const dir = build === 'web' ? 'dist' : build === 'y8' ? 'dist-y8-test' : `dist-${build}`;
-  if (build === 'y8') {
-    // the Y8 SDK only starts with an App ID / Game ID: a test build with placeholder IDs (the real build has none yet)
-    execFileSync('npx', ['vite', 'build', '--mode', 'y8', '--outDir', 'dist-y8-test', '--emptyOutDir'], {
-      cwd: ROOT, stdio: 'ignore', env: { ...process.env, VITE_Y8_APP_ID: 'test-app-id', VITE_Y8_GAME_ID: 'test-game-id' },
-    });
-  }
+  const dir = build === 'web' ? 'dist' : `dist-${build}`;
   const { server, url } = await serveDist(dir);
   const browser = await launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
@@ -77,7 +70,11 @@ async function run(build) {
   if (build === 'playgama') check(c0.includes('sendMessage:game_ready'), 'game_ready sent once the title is shown', c0.join(' '));
   if (build === 'gamepix') check(c0.includes('loading:100') && c0.includes('loaded') && c0.indexOf('loading:0') < c0.indexOf('loading:100'), 'lifecycle loading 0 → 100, then loaded()', c0.join(' '));
   if (build === 'crazygames') check(c0.includes('init') && c0.includes('loadingStart') && c0.includes('loadingStop'), 'SDK.init(), loadingStart → loadingStop before the title', c0.join(' '));
-  if (build === 'y8') check(c0.some((c) => c === 'init'), 'Y8 SDK initialised from the y8sdk.ready snippet', c0.join(' '));
+  if (build === 'y8') {
+    const init = await page.evaluate(() => window.__mock.calls.find((c) => c.n === 'init')?.a);
+    check(init && init.appId === '6aff479cc9841fd9d0e5db3e' && init.gameId === '294329' && init.autoLogin === true && init.preloadAdBreaks === 'on' && init.sound === 'on',
+      'Y8 SDK initialised from the y8sdk.ready snippet with the App ID, Game ID, autoLogin, preloadAdBreaks and sound', JSON.stringify(init));
+  }
   check(!(await ads()).length, 'no pre-roll / no ad at boot');
   const lang = await G(() => window.__DTTD.lang());
   if (['playgama', 'gamepix', 'crazygames'].includes(build)) check(lang === 'de', "the portal's language is used (mock: de)", lang);

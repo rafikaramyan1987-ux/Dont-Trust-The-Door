@@ -18,14 +18,15 @@ for (const [needle, what] of [
   ['adViewed', 'adViewed'],
   ['visibilitychange', 'visibilitychange pause'],
 ]) c.check(!code.includes(needle), `${what} missing`, `${what} in the bundle`);
-const app = process.env.VITE_Y8_APP_ID ?? '';
-const game = process.env.VITE_Y8_GAME_ID ?? '';
-if (!app || !game || !code.includes(app) || !code.includes(game))
-  c.note(
-    'Y8 App ID / Game ID are NOT in this build (VITE_Y8_APP_ID / VITE_Y8_GAME_ID are empty): the zip plays without ads. ' +
-      'Owner: create the game in Y8 Studio, then run `VITE_Y8_APP_ID=<app id> VITE_Y8_GAME_ID=<game id> npm run submission:y8` before uploading.',
-  );
-else c.check(false, '', `App ID ${app} and Game ID ${game} are in the build`);
+const app = process.env.VITE_Y8_APP_ID || '6aff479cc9841fd9d0e5db3e';
+const game = process.env.VITE_Y8_GAME_ID || '294329';
+c.check(!code.includes(`"${app}"`) && !code.includes(`'${app}'`), `App ID ${app} is not in the build`, `App ID ${app} in the build`);
+c.check(!code.includes(`"${game}"`) && !code.includes(`'${game}'`), `Game ID ${game} is not in the build`, `Game ID ${game} in the build`);
+for (const [re, what] of [
+  [/appId:\s*\w+,\s*autoLogin:\s*!0|appId:[^,}]+,autoLogin:!0|autoLogin:\s*true/, 'appConfig { appId, autoLogin: true }'],
+  [/preloadAdBreaks:\s*["']on["']/, "adConfig preloadAdBreaks: 'on'"],
+  [/sound:\s*["']on["']/, "adConfig sound: 'on'"],
+]) c.check(!re.test(code), `${what} missing`, `${what} in the bundle`);
 if (!process.argv.includes('--no-media')) {
   const MB = 1 << 20;
   mediaChecks(c, 'submission-y8/media', [
