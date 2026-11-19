@@ -20,6 +20,10 @@ export const SOFTLOCK_EXT = [
   },
   // level 20: the arrow plank tips over (gone); signs, guides and party guests drawn on '?' tiles are nothing to stand on
   { kinds: ['l20seesaw'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+  // level 14: locks open (their tiles go), lowered bridges appear, a key lying in a bridge can be picked up (it goes);
+  // a key, a padlock hanging from a post, a magpie or a bat take no room
+  { kinds: ['lock', 'key'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+  { kinds: ['bridge'], alts: () => [{ dx: 0, dy: 0, present: true }] },
 ];
 
 export function extFor(def) {
