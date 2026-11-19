@@ -2,7 +2,10 @@
 // Each entry: { kinds: ['key', …], cell?(def) → { solid?, deadly? }, alts?(def, cells) → [{ dx, dy, present }] }.
 //   cell: how one tile of such a group counts (default: as its `tile` says: '#' solid, spikes deadly, '?' nothing)
 //   alts: extra world states for such a group (where it can be, whether it is there)
-export const SOFTLOCK_EXT = [];
+export const SOFTLOCK_EXT = [
+  // level 19: walls / bridge planks that explosions blow away, and the giant (solid) bomb that pops
+  { kinds: ['fw-wall', 'fw-bomb'], alts: () => [{ dx: 0, dy: 0, present: false }] },
+];
 
 export function extFor(def) {
   const kind = def?.ext?.kind;
