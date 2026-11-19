@@ -40,7 +40,7 @@ function booGhost(b) {
 /** TRAP hopping-chair: a possessed chair hops after you and squashes you at the high step – dodge it, then climb on it. */
 function hoppingChair(b) {
   b.ground(0, 23);
-  b.fill(16, 19, 11, 14, '#');
+  b.fill(16, 18, 11, 14, '#');
   web(b, 21, 8);
   const chair = b.group({ tile: '#', ext: { kind: 'chair', wake: ax(b, 6), rest: 46, air: 24, hop: 3, h: 50, min: 0, max: 12 } });
   b.put(3, 14, chair);
@@ -392,7 +392,7 @@ export default {
     [flat(4), pit(3, 2), up(2, 3), spikes(3, 2, 1), isle(3, 2, -1), down(2, 3), thorns(2, 1), pit(4, 2), block(2, 1, 2), spikes(3, 2)],
     [thorns(1, 3), up(1, 2), pit(4, 2), isle(3, 3, 1), spikes(2, 2, -2), roof(3), flat(1), pit(3, 2), block(1, 2, 2), thorns(3, 2)],
     [pillars(2, 1, [2, 0, 1]), spikes(3, 2, -2), down(1, 3), isle(4, 1), isle(3, 2, 1), down(1, 2), thorns(2, 2), roof(2), flat(1), pit(3, 2)],
-    [up(2, 2), spikes(4, 2), isle(2, 1, 1), isle(3, 2, -1), pit(2, 3, 1), down(3, 4), block(2, 2, 2), spikes(2, 2), roof(1), flat(1), pit(3, 1)],
+    [up(2, 2), isle(2, 1, 1), spikes(4, 2), isle(3, 2, -1), pit(2, 3, 1), down(3, 4), block(2, 2, 2), spikes(2, 2), roof(1), flat(1), pit(3, 1)],
     [up(1, 3), roof(2), flat(1), pit(3, 2, 2), spikes(4, 3, -3), isle(3, 1), isle(3, 1), isle(2, 3, 1), down(1, 2), thorns(2, 2), block(1, 1, 2)],
     [pit(4, 1), pit(3, 2, 2), down(2, 3), spikes(3, 1), spikes(3, 2), up(3, 2), down(3, 4), isle(4, 2), thorns(2, 2), roof(2)],
     [block(2, 1, 2), pit(4, 2), up(1, 1), pit(3, 2, -1), isle(2, 2, 2), isle(3, 2, 1), spikes(3, 2, -3), pit(4, 1), thorns(2, 2), roof(2)],
