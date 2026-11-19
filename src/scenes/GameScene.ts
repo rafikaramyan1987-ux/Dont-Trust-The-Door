@@ -807,7 +807,7 @@ export class GameScene extends Phaser.Scene {
     const staticTiles: { tx: number; ty: number }[] = [];
     this.staticSolid = new Set();
     const solidAll = new Set<number>();
-    const key = (x: number, y: number) => y * 1000 + x;
+    const key = (x: number, y: number) => y * 10000 + x;
     const COLS = this.cols;
     let doorAt: { tx: number; ty: number } | null = null;
     const fakeAt: { tx: number; ty: number }[] = [];
@@ -1074,10 +1074,10 @@ export class GameScene extends Phaser.Scene {
         // wooden crates instead of terrain
         for (const v of tiles) container.add(this.add.image(v.tx * TILE, v.ty * TILE, def.look === 'cracked' ? 'crate-cracked' : 'crate').setOrigin(0).setScale(1 / RES));
       } else if (!this.textures.exists(k)) {
-        const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
-        const seam = (x: number, y: number) => !own.has(y * 1000 + x) && this.staticSolid.has(y * 1000 + x);
+        const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
+        const seam = (x: number, y: number) => !own.has(y * 10000 + x) && this.staticSolid.has(y * 10000 + x);
         const bounds = { x: minX * TILE - 2, y: minY * TILE - 2, w: (maxX - minX + 1) * TILE + 4, h: (maxY - minY + 1) * TILE + 4 };
-        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 1000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
+        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 10000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
       }
       if (!def.crate) {
         const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
@@ -1091,9 +1091,9 @@ export class GameScene extends Phaser.Scene {
       if (def.conveyor) g.arrows = this.addConveyorArrows(container, tiles, def.conveyor);
       if (def.button) {
         // the button cap on every top (or, for a ceiling switch, bottom) tile of the group
-        const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
+        const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
         for (const v of tiles) {
-          const edge = def.ceilButton ? !own.has((v.ty + 1) * 1000 + v.tx) : !own.has((v.ty - 1) * 1000 + v.tx);
+          const edge = def.ceilButton ? !own.has((v.ty + 1) * 10000 + v.tx) : !own.has((v.ty - 1) * 10000 + v.tx);
           if (!edge) continue;
           const y = def.ceilButton ? (v.ty + 1) * TILE : v.ty * TILE;
           const cap = this.add.image(v.tx * TILE + TILE / 2, y + (def.ceilButton ? -1 : 1), `plate-${def.button}`).setScale(1 / RES).setOrigin(0.5, 1).setFlipY(!!def.ceilButton);
@@ -1138,7 +1138,7 @@ export class GameScene extends Phaser.Scene {
     } else if (t === '~') {
       // water: a translucent body with a wavy surface where no water is above (drawn over the hero)
       container.setDepth(4.6);
-      const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
+      const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
       // drawn once into a texture (a live Graphics object would be re-tessellated every frame)
       const x0 = Math.min(...tiles.map((v) => v.tx)) * TILE, y0 = Math.min(...tiles.map((v) => v.ty)) * TILE;
       const x1 = (Math.max(...tiles.map((v) => v.tx)) + 1) * TILE, y1 = (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE;
@@ -1147,7 +1147,7 @@ export class GameScene extends Phaser.Scene {
         const gfx = this.make.graphics({ x: 0, y: 0 }, false);
         const deep = def.tint ?? 0x3aa6d8;
         for (const v of tiles) {
-          const top = !own.has((v.ty - 1) * 1000 + v.tx);
+          const top = !own.has((v.ty - 1) * 10000 + v.tx);
           const px = v.tx * TILE - x0, py = v.ty * TILE - y0;
           gfx.fillStyle(deep, top ? 0.5 : 0.6).fillRect(px, py + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
           if (top) {
@@ -1768,7 +1768,7 @@ export class GameScene extends Phaser.Scene {
   /** Is there solid ground anywhere above the hero (shelter from lightning)? */
   private roofed(): boolean {
     const tx = Math.floor(this.pbody.center.x / TILE);
-    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 1000 + tx)) return true;
+    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 10000 + tx)) return true;
     return false;
   }
 
@@ -2156,7 +2156,7 @@ export class GameScene extends Phaser.Scene {
   private boxBlocked(r: R, self: GroupRT): GroupRT | 'static' | null {
     const x0 = Math.floor((r.x + 0.5) / TILE), x1 = Math.floor((r.x + r.w - 0.5) / TILE);
     const y0 = Math.floor((r.y + 0.5) / TILE), y1 = Math.floor((r.y + r.h - 0.5) / TILE);
-    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (this.staticSolid.has(ty * 1000 + tx)) return 'static';
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (this.staticSolid.has(ty * 10000 + tx)) return 'static';
     for (const g of this.groups.values()) {
       if (g === self || !g.visible || !g.solid || g.state === 'gone') continue;
       for (const t of g.tiles) if (overlap({ x: r.x + 0.5, y: r.y + 0.5, w: r.w - 1, h: r.h - 1 }, { x: t.tx * TILE + g.ox, y: t.ty * TILE + g.oy, w: TILE, h: TILE })) return g;
@@ -2240,7 +2240,7 @@ export class GameScene extends Phaser.Scene {
       g.oy += (dy / dist) * d.homing;
       // it cannot fly through walls: crashing into solid ground ends it
       const tx = Math.floor((g.cx + g.ox) / TILE), ty = Math.floor((g.cy + g.oy) / TILE);
-      if (this.staticSolid.has(ty * 1000 + tx)) {
+      if (this.staticSolid.has(ty * 10000 + tx)) {
         g.active = false;
         g.visible = false;
         g.container.setVisible(false);
@@ -2293,7 +2293,7 @@ export class GameScene extends Phaser.Scene {
       sh.left -= Math.abs(sh.vx);
       const tx = Math.floor(sh.x / TILE), ty = Math.floor(sh.y / TILE);
       const blocked = [...this.groups.values()].some((g) => g.def.crate && g.visible && g.state === 'idle' && overlap({ x: sh.x - 8, y: sh.y - 8, w: 16, h: 16 }, this.crateBox(g)));
-      if (sh.left <= 0 || blocked || this.staticSolid.has(ty * 1000 + tx)) {
+      if (sh.left <= 0 || blocked || this.staticSolid.has(ty * 10000 + tx)) {
         if (blocked) { this.emitDust.emitParticleAt(sh.x, sh.y, 5); this.sfx('land'); }
         sh.left = -1;
         sh.img.destroy();
@@ -2733,24 +2733,24 @@ function approach(v: number, target: number, step: number): number {
 
 /** Greedy merge of tiles into rectangles (fewer physics bodies, no seams). */
 function mergeRects(tiles: { tx: number; ty: number }[]): { x: number; y: number; w: number; h: number }[] {
-  const set = new Set(tiles.map((t) => t.ty * 1000 + t.tx));
+  const set = new Set(tiles.map((t) => t.ty * 10000 + t.tx));
   const used = new Set<number>();
   const out: { x: number; y: number; w: number; h: number }[] = [];
   const sorted = [...tiles].sort((a, b) => a.ty - b.ty || a.tx - b.tx);
   for (const t of sorted) {
-    const k = t.ty * 1000 + t.tx;
+    const k = t.ty * 10000 + t.tx;
     if (used.has(k)) continue;
     let w = 1;
-    while (set.has(t.ty * 1000 + t.tx + w) && !used.has(t.ty * 1000 + t.tx + w)) w++;
+    while (set.has(t.ty * 10000 + t.tx + w) && !used.has(t.ty * 10000 + t.tx + w)) w++;
     let h = 1;
     outer: for (;;) {
       for (let i = 0; i < w; i++) {
-        const kk = (t.ty + h) * 1000 + t.tx + i;
+        const kk = (t.ty + h) * 10000 + t.tx + i;
         if (!set.has(kk) || used.has(kk)) break outer;
       }
       h++;
     }
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 1000 + t.tx + i);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 10000 + t.tx + i);
     out.push({ x: t.tx, y: t.ty, w, h });
   }
   return out;
