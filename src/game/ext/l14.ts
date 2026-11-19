@@ -324,7 +324,8 @@ function openLock(s: Scene, g: any, h: Held | null): void {
 const l14: Ext = {
   name: N,
   init(s) {
-    const on = Object.values(s.lvl.groups ?? {}).some((d: any) => KINDS.includes(d.ext?.kind));
+    // only on level 14: level 18 also has groups of kind 'key' (its piano keys)
+    const on = s.lvl?.id === 14 && Object.values(s.lvl.groups ?? {}).some((d: any) => KINDS.includes(d.ext?.kind));
     s.ext[N] = { on, keys: [], drops: [], fish: [], birds: [], bats: [], prog: new Map(), yankT: 0, gfx: null, icons: [], noteT: 0 } as St;
   },
   group(s, g) {
