@@ -153,3 +153,4 @@ dist/
 test-results/
 .tmp/
 dist-*/
+.claude/
