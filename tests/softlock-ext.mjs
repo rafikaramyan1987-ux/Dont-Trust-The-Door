@@ -43,6 +43,8 @@ export const SOFTLOCK_EXT = [
         case 'lift': span(e.rise, (i) => ({ dx: 0, dy: -i, present: true })); break;
       }
       return out;
+    },
+  },
   // level 16 (src/game/ext/l16.ts): sizes. The analyzer models the normal hero; mushrooms, arches, rings, puffballs,
   // vents, wind and flytraps are no terrain; a half-height slab (tiny-only slot) counts as open; brambles say in `sl`
   // whether they count as deadly. Cracked planks can be gone, lily pads / flower heads sunk, springs snapped.
