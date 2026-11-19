@@ -26,9 +26,9 @@ const FONT = readFileSync(join(ROOT, 'node_modules/@fontsource/nunito/files/nuni
 
 /** trap moments of the new levels: [level, trap type, 'die' | 'solve', frames after it fires] */
 const MOMENTS = [
-  [19, 'firework-cake', 'die', 30],
-  [15, 'prism-fan', 'die', 30],
-  [16, 'tunnel-shroom', 'die', 30],
+  [19, 'firework-cake', 'die', 75],
+  [15, 'prism-fan', 'die', 70],
+  [16, 'tunnel-shroom', 'die', 10],
   [18, 'boo-ghost', 'die', 40],
   [17, 'gap-fan', 'die', 30],
   [20, 'arrow-shaft', 'die', 24],
