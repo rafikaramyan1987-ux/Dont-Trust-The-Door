@@ -15,6 +15,10 @@ import '@fontsource/nunito/latin-ext-800.css';
 import '@fontsource/nunito/latin-ext-900.css';
 import '@fontsource/nunito/cyrillic-800.css';
 import '@fontsource/nunito/cyrillic-900.css';
+import { portraitAllowed } from './layout';
+
+// ?portrait=1 (tests) does what the YouTube build's `portrait-ok` body class does: no rotate screen, portrait layouts.
+if (portraitAllowed()) document.body.classList.add('portrait-ok');
 
 /** The language: the player's own 🌐 choice, else the portal's (if supported), else the browser's, else English. */
 function applyLanguage(): void {
