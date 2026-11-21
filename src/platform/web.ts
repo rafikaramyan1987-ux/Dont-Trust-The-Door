@@ -22,7 +22,9 @@ export class WebPlatform implements Platform {
   levelFailed(): void {}
   gameplay(): void {}
   async interstitial(): Promise<void> {}
-  async preroll(): Promise<void> {}
+  preroll(): null {
+    return null;
+  }
   async rewarded(): Promise<boolean> {
     return false;
   }

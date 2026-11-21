@@ -126,10 +126,10 @@ export class GameDistributionPlatform extends BasePlatform implements Platform {
     });
   }
 
-  async preroll(): Promise<void> {
-    if (this.prerollDone) return;
+  preroll(): Promise<void> | null {
+    if (this.prerollDone || !this.sdk()) return null;
     this.prerollDone = true;
-    await this.show();
+    return this.show().then(() => undefined);
   }
   async interstitial(): Promise<void> {
     await this.show();

@@ -103,9 +103,12 @@ export class TitleScene extends Phaser.Scene {
     const s = Save.get();
     const next = Math.min(s.unlocked, LEVELS.length);
     // GameDistribution: its pre-roll on the Play button (a no-op on the other builds)
-    void Portal.preroll().catch(() => undefined).then(() => {
+    const go = () => {
       if (this.sys.isActive()) this.scene.start('Game', { level: next });
-    });
+    };
+    const pre = Portal.preroll();
+    if (pre) void pre.catch(() => undefined).then(go);
+    else go();
   }
 
   private relayout(): void {

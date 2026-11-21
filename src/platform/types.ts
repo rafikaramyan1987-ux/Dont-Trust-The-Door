@@ -59,8 +59,9 @@ export interface Platform {
   readonly rewardedSupported: boolean;
   /** an interstitial at a break (Next / Levels on the level-clear card); settles exactly once */
   interstitial(place: AdPlace): Promise<void>;
-  /** the portal's pre-roll when the player presses Play (GameDistribution; a no-op elsewhere); settles exactly once */
-  preroll(): Promise<void>;
+  /** the portal's pre-roll when the player presses Play (GameDistribution, once per session): a promise that settles
+   * exactly once, or null when there is none (the game starts at once) */
+  preroll(): Promise<void> | null;
   /** a rewarded ad; true only when the SDK confirmed the reward; settles exactly once */
   rewarded(): Promise<boolean>;
   /** the game listens: paused (ad, portal pause, hidden page) and muted (the same, or the portal's sound switch) */
@@ -125,8 +126,8 @@ export abstract class BasePlatform {
   }
 
   firstFrame(): void {}
-  preroll(): Promise<void> {
-    return Promise.resolve();
+  preroll(): Promise<void> | null {
+    return null;
   }
 
   /**

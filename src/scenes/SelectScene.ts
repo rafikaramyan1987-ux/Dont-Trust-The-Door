@@ -97,9 +97,12 @@ export class SelectScene extends Phaser.Scene {
         if (locked) { this.cameras.main.shake(120, 0.004); return; }
         Audio.unlock();
         // GameDistribution: its pre-roll when the player starts playing (a no-op on the other builds)
-        void Portal.preroll().catch(() => undefined).then(() => {
+        const go = () => {
           if (this.sys.isActive()) this.scene.start('Game', { level: id });
-        });
+        };
+        const pre = Portal.preroll();
+        if (pre) void pre.catch(() => undefined).then(go);
+        else go();
       });
       b.setName(`level-${id}`);
       if (locked) {
