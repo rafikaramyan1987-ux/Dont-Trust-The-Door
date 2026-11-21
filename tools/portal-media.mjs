@@ -44,6 +44,7 @@ const browser = await launch();
 async function gamePage(w, h) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
+  page.setDefaultTimeout(120000);
   await page.goto(`${url}?test=1&boot=none`);
   await page.waitForFunction(() => window.__DTTD && window.__DTTD.game.scene.getScene('Boot').sys.settings.status >= 5);
   await page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.lang('en'); window.__DTTD.setManual(true); });
@@ -111,7 +112,8 @@ async function shotAt(w, h, m, opts = {}) {
 
 /** the icon: the hero next to the EXIT at the end of level 11, the camera zoomed in */
 async function icon(size, out) {
-  const { ctx, page } = await gamePage(size * 2, size * 2);
+  // rendered at 2× (at most 1024 px: software WebGL is slow at bigger sizes), then scaled down
+  const { ctx, page } = await gamePage(Math.min(size * 2, 1024), Math.min(size * 2, 1024));
   await page.evaluate(() => {
     const T = window.__DTTD;
     const rec = null;
