@@ -79,6 +79,8 @@ async function boot(): Promise<void> {
   ]).catch(() => undefined);
   Portal.loading(90);
   start();
+  // the recorded sounds load in the background (the first scene does not wait for them)
+  void Audio.preload();
 }
 
 void boot();

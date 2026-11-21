@@ -13,6 +13,7 @@
     "test": "npm run test:levels && npm run test:i18n && npm run build && npm run test:bot && npm run submission && npm run test:portals",
     "record": "npm run levels && vite build && node tests/author-replays.mjs",
     "media": "node tools/capture-media.mjs --screens-only",
+    "audio": "node tools/render-audio.mjs",
     "levels": "node tools/level-builder/build.mjs && node tests/validate-levels.mjs",
     "test:i18n": "node tests/i18n.mjs",
     "build:web": "tsc --noEmit && vite build --mode web",

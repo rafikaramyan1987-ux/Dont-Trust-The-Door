@@ -497,7 +497,7 @@ URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touc
 
 ## Tech
 
-- Vite + TypeScript + Phaser 3.90 (Arcade physics). Art, sound and music are generated in code.
+- Vite + TypeScript + Phaser 3.90 (Arcade physics). Art is generated in code; sound and music are recorded mp3 files (`public/audio/`, rendered from the synthesiser in `src/audio-synth.ts` with `npm run audio`).
 - Deterministic fixed 60 Hz simulation (Arcade stepped manually), so bot replays are frame-exact.
   Camera tricks (freeze, zoom, flip, darkness, strobe, smudge, look-back, seasick tilt, decoy) are
   presentation only and never change the simulation.
