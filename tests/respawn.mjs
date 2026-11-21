@@ -13,7 +13,8 @@
 //       d) so no stuck state: from the respawn the EXIT is reachable.
 //  2. A random-input explorer (fixed seeds, reproducible): segments of seeded random play starting at points along
 //     the winning run, at least `--explore` seconds of simulated play per level (default 300). Whenever the hero has
-//     stayed within 1 tile for 20 s of game time without dying while the inputs keep changing, that state is probed:
+//     stayed inside a 3×3-tile box (so also within 1 tile) for 20 s of game time without dying while the inputs keep
+//     changing, that state is probed:
 //     20 seeded rollouts from it (the state is re-created by re-simulating the segment) must reach a death, a new
 //     checkpoint or the EXIT; a state where none does is a failure (neither the EXIT reachable nor death possible).
 // Usage: npm run build && node tests/respawn.mjs [--levels 1-20] [--explore 300]
@@ -54,6 +55,46 @@ function diff(a, b, path = '', out = []) {
   return out;
 }
 const strip = (d) => Object.fromEntries(Object.entries(d).filter(([k]) => !ATTEMPT_KEYS.has(k)));
+
+// Self-check of the stuck detector: in a modified in-memory copy of level 1 the hero is boxed in at the spawn
+// (walls left and right, a roof, nothing that can kill): the explorer must find the stall and every probe must fail.
+{
+  const { page, ctx } = await openGame(browser, url);
+  const r = await page.evaluate(({ stallTicks, probes }) => {
+    const T = window.__DTTD;
+    T.resetSave(); T.setManual(true);
+    const L = T.levelData(1);
+    const y = L.map.findIndex((row) => row.includes('P'));
+    const x = L.map[y].indexOf('P');
+    const put = (tx, ty) => { L.map[ty] = L.map[ty].slice(0, tx) + '#' + L.map[ty].slice(tx + 1); };
+    for (let ty = y - 2; ty <= y; ty++) { put(x - 1, ty); put(x + 2, ty); }
+    for (let tx = x - 1; tx <= x + 2; tx++) put(tx, y - 2);
+    const rng = (seed) => { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let q = a; q = Math.imul(q ^ (q >>> 15), q | 1); q ^= q + Math.imul(q ^ (q >>> 7), q | 61); return ((q ^ (q >>> 14)) >>> 0) / 4294967296; }; };
+    const keys = ['R', 'RJ', 'L', 'LJ', 'J', ''];
+    T.release(); T.start(1);
+    const r0 = rng(1);
+    const pos = [];
+    let stall = -1, k = '';
+    for (let i = 0; i < 3000; i++) {
+      if (i % 20 === 0) k = keys[Math.floor(r0() * keys.length)];
+      T.sim(k, 1);
+      const s = T.state();
+      pos.push([s.x, s.y]);
+      if (i >= stallTicks) { const w = pos.slice(-stallTicks); const xs = w.map((p) => p[0]), ys = w.map((p) => p[1]); if (Math.max(...xs) - Math.min(...xs) <= 120 && Math.max(...ys) - Math.min(...ys) <= 120) { stall = i; break; } }
+    }
+    let escaped = 0;
+    for (let p = 0; p < probes; p++) {
+      const s0 = T.state();
+      const rp = rng(100 + p);
+      for (let i = 0; i < 600; i++) { if (i % 15 === 0) k = keys[Math.floor(rp() * keys.length)]; T.sim(k, 1); const s = T.state(); if (s.deathsLevel > s0.deathsLevel || s.state !== 'play' || s.cpIdx > s0.cpIdx) { escaped++; break; } }
+    }
+    return { stall, escaped };
+  }, { stallTicks: STALL_TICKS, probes: 5 });
+  await ctx.close();
+  const ok = r.stall > 0 && r.escaped === 0;
+  console.log(`self-check: a boxed-in hero (modified copy of level 1) ${ok ? 'is found by the explorer and reported as stuck' : 'was NOT detected'} (stall at tick ${r.stall}, ${r.escaped} probe(s) escaped)`);
+  if (!ok) failures++;
+}
 
 for (let L = l0; L <= l1; L++) {
   const t0 = Date.now();
@@ -213,9 +254,11 @@ for (let L = l0; L <= l1; L++) {
         maxCp = Math.max(maxCp, s.cpIdx);
         pos.push([s.x, s.y]);
         if (i - lastDeath >= stallTicks && s.state === 'play') {
+          // stalled: 20 s inside a 3×3-tile box (stricter than "not more than 1 tile": small pockets count too)
           const win = pos.slice(-stallTicks);
           const [cx, cy] = win[win.length - 1];
-          if (win.every(([x, y]) => Math.abs(x - cx) <= 40 && Math.abs(y - cy) <= 40) && new Set(inputs.slice(-stallTicks)).size > 1)
+          const xs = win.map((p) => p[0]), ys = win.map((p) => p[1]);
+          if (Math.max(...xs) - Math.min(...xs) <= 120 && Math.max(...ys) - Math.min(...ys) <= 120 && new Set(inputs.slice(-stallTicks)).size > 1)
             return { k, inputs, deaths, maxX, maxCp, stall: { x: cx, y: cy, cp: s.cpIdx, tick: i } };
         }
       }
