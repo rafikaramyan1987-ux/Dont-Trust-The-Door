@@ -1,66 +1,40 @@
 # Don't Trust the Door — CrazyGames
 
-| Form field | File (in `submission-crazygames/`) |
+Upload `dont-trust-the-door-crazygames.zip` (this folder). The images and videos for the form are in
+[`../store/crazygames/`](../store/crazygames/), shared ones in [`../store/icon/`](../store/icon/) and
+[`../store/screenshots/`](../store/screenshots/). Rebuild with `npm run release -- crazygames`.
+
+| Form field | File / value |
 |---|---|
-| Game files (zip) | `dont-trust-the-door-crazygames-v1.zip` — `index.html` at the root, relative paths only |
-| Cover landscape (1920×1080) | `cover-1920x1080.png` |
-| Cover portrait (800×1200) | `cover-800x1200.png` |
-| Cover square (800×800) | `cover-800x800.png` |
-| Icon (512×512) | `icon-512x512.png` |
-| Trailer landscape (1920×1080) | `trailer-1920x1080.mp4` (20 s, level 12: crates) |
-| Trailer portrait (1080×1920) | `trailer-1080x1920.mp4` (20 s, level 13: water) |
+| Game files (zip) | `dont-trust-the-door-crazygames.zip` (`index.html` at the root, relative paths; well under the 50 MB initial download and 1500 files) |
+| Cover landscape 16:9 (1920×1080) | `../store/crazygames/cover-1920x1080.png` |
+| Cover portrait 2:3 (800×1200) | `../store/crazygames/cover-800x1200.png` |
+| Cover square 1:1 (800×800) | `../store/crazygames/cover-800x800.png` |
+| Preview video landscape 1080p 16:9 | `../store/crazygames/video-landscape-1920x1080.mp4` (19 s, no sound, starts on the cover) |
+| Preview video portrait 1080p 2:3 | `../store/crazygames/video-portrait-1080x1620.mp4` (19 s, no sound, starts on the cover) |
+| Description / controls | listing texts below |
+| Category | Platformer |
+| Orientation | landscape (desktop and mobile) |
 
-## Name
+## Listing texts
 
-Don't Trust the Door
+All texts, in English and French, are in [`../store/text/listing-en.md`](../store/text/listing-en.md) and
+[`../store/text/listing-fr.md`](../store/text/listing-fr.md) (also `listing.json`):
+title, short description (≤ 160 characters), long description, controls (keyboard and touch), category, 8 tags.
 
-## Description (364 characters)
+- **Title:** Don't Trust the Door
+- **Short description:** A cute troll platformer: 20 levels, 241 traps. The floor, the coins, the springs and even the EXIT door lie to you. Die, laugh, try again.
+- **Controls (keyboard):** Move: Left / Right arrows or A / D. Jump: Up arrow, W, Space, Z or K. Restart the level: R. Pause: P. Sound on / off: M. Next / confirm: Enter.
+- **Controls (touch):** Move: the ◀ and ▶ buttons at the bottom left. Jump: the ▲ button at the bottom right (hold for a higher jump). On-screen buttons for restart, pause, sound and the hint (bulb).
 
-A troll platformer where the level betrays you. Floors sink, coins bite, springs lie, the camera cheats and the EXIT runs away. Every trap is fair the second time: spot the trick, remember it and outsmart the level. 13 hand-made levels with 122 traps: buttons that lie, crates you can't trust, water that won't let go. One hint per level, checkpoints, 8 languages.
+## Integration (CrazyGames rules)
 
-## How to play
-
-Run and jump to the EXIT door at the end of each level. Almost everything is a trap: a floor that sinks, a coin that bites, a button that does the opposite of what it promises. When a trap gets you, you are back at the last checkpoint in a moment; remember the trick and beat it the next time. Stuck? The bulb gives one hint per level and highlights the next trap.
-
-## Controls
-
-- **Keyboard:** ← → or A / D to move, Space / ↑ / W to jump (hold for a higher jump), P pause, R restart the level, M sound.
-- **Touch:** on-screen ◀ ▶ buttons on the left, the jump button on the right; pause, restart, sound and the hint bulb at the top.
-- **Mouse:** menus and the buttons at the top.
-
-## Tags
-
-platformer, troll, trap, funny, hard, puzzle, jump, retro, 2d, casual, mobile, html5
-
-## Category
-
-Platformer
-
-## CrazyGames SDK v3
-
-- `<script src="https://sdk.crazygames.com/crazygames-sdk-v3.js">` in `<head>`; `SDK.init()` before the game starts.
-- `loadingStart` / `loadingStop` around the boot, `gameplayStart` / `gameplayStop` around every level, `happytime()`
-  on a level clear.
-- Saves: the SDK's data module (key `dttd-save-v1`, the same JSON as the web version). Language:
-  `user.systemInfo.locale`. The SDK's `muteAudio` setting mutes the game.
-
-## Ads
-
-- No pre-roll, no ad during a level, no ad after a death, none before level 1 is finished.
-- Interstitial: only when the player presses **Next level** or **Levels / Menu** on the level-clear card.
-- Rewarded: the hint bulb asks "Watch an ad for the hint"; the hint is given only when the SDK confirms the reward;
-  otherwise "No ad available right now, try again later" and the hint stays available. One hint per level, no other
-  rewards. Where rewarded ads are not supported, the hint is free.
-- The game is paused and muted while an ad plays (and while the page is hidden); afterwards the player's own sound
-  setting applies again. Every ad request settles exactly once (finished, closed, failed or an 8 s timeout).
-- `requestAd('midgame')` / `requestAd('rewarded')`: paused and muted from `adStarted` to `adFinished` / `adError`;
-  the SDK paces the midgame ads (no timer of our own).
-
-## Rebuild
-
-```sh
-npm ci
-npm run submission:crazygames     # vite build --mode crazygames → zip → checks (scripts/crazygames/check.mjs)
-npm run test:portals -- crazygames   # mocked-SDK browser tests
-node tools/portal-media.mjs   # covers, screenshots and videos from real play (needs a build: npm run build)
-```
+- SDK v3 `https://sdk.crazygames.com/crazygames-sdk-v3.js` in `<head>`; `await SDK.init()`; `loadingStart` /
+  `loadingStop` around the boot; `gameplayStart` / `gameplayStop` around levels and the pause menu (never on a lost
+  focus); `happytime()` only when the whole game is finished.
+- `requestAd('midgame')` only at the level transition (Next on the level-clear card), never on menu buttons; the SDK
+  paces it. `requestAd('rewarded')` for the hint, granted only on `adFinished`. Mute + pause from `adStarted` to
+  `adFinished` / `adError`; `settings.muteAudio` is honoured; saves in the data module; language from
+  `systemInfo.locale` (English otherwise); Escape is not used.
+- Enable "Progress Save / Data Module" in the submission form (the game saves through `SDK.data`).
+- Checked by `scripts/crazygames/check.mjs`.

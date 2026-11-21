@@ -1,0 +1,38 @@
+{
+  "en": {
+    "title": "Don't Trust the Door",
+    "short": "A cute troll platformer: 20 levels, 241 traps. The floor, the coins, the springs and even the EXIT door lie to you. Die, laugh, try again.",
+    "long": "Don't Trust the Door is a cute troll platformer where the level itself betrays you.\n\nThe floor gives way, \"safe\" coins bite, springs launch you into spikes, the ceiling comes down, your controls swap, gravity flips, the EXIT door runs away and the camera lies. Later levels bring buttons that do the opposite of what they promise, crates you push and climb, water you swim in, keys and locks, lasers, shrinking and growing, wind, ghosts, fireworks and signs that send you the wrong way.\n\nThere are 20 hand-made levels with 241 traps, and every trap is a different idea. Each one surprises you the first time and can be beaten the second time: the hero is always on screen and every trap has a fair solution. Each level is longer than the one before and has one more trap.\n\nDeath costs nothing: you restart at once, from the last checkpoint flag. A death counter keeps score. Stuck? Each level has one hint that you choose when to use. Your progress is saved.\n\nPlay with the keyboard or with the on-screen touch buttons. Available in 8 languages: English, French, German, Spanish, Brazilian Portuguese, Italian, Russian and Turkish.",
+    "controls_keyboard": "Move: Left / Right arrows or A / D. Jump: Up arrow, W, Space, Z or K. Restart the level: R. Pause: P. Sound on / off: M. Next / confirm: Enter.",
+    "controls_touch": "Move: the ◀ and ▶ buttons at the bottom left. Jump: the ▲ button at the bottom right (hold for a higher jump). On-screen buttons for restart, pause, sound and the hint (bulb).",
+    "category": "Platformer",
+    "tags": [
+      "platformer",
+      "troll",
+      "funny",
+      "traps",
+      "puzzle",
+      "2d",
+      "cute",
+      "hard"
+    ]
+  },
+  "fr": {
+    "title": "Don't Trust the Door",
+    "short": "Un mignon jeu de plateforme troll : 20 niveaux, 241 pièges. Le sol, les pièces, les ressorts et même la porte de SORTIE te mentent. Meurs, ris, recommence.",
+    "long": "Don't Trust the Door est un mignon jeu de plateforme troll où le niveau lui-même te trahit.\n\nLe sol se dérobe, les pièces « sans danger » mordent, les ressorts t'envoient dans les pics, le plafond descend, tes commandes s'inversent, la gravité bascule, la porte de SORTIE s'enfuit et la caméra ment. Les niveaux suivants ajoutent des boutons qui font le contraire de ce qu'ils promettent, des caisses à pousser et à escalader, de l'eau où nager, des clés et des serrures, des lasers, un héros qui rétrécit et grandit, du vent, des fantômes, des feux d'artifice et des panneaux qui t'envoient dans la mauvaise direction.\n\nIl y a 20 niveaux faits à la main avec 241 pièges, et chaque piège est une idée différente. Chacun te surprend la première fois et se déjoue la deuxième : le héros est toujours à l'écran et chaque piège a une solution juste. Chaque niveau est plus long que le précédent et a un piège de plus.\n\nMourir ne coûte rien : tu recommences aussitôt, depuis le dernier drapeau de point de contrôle. Un compteur de morts tient les comptes. Bloqué ? Chaque niveau a un indice, que tu utilises quand tu veux. Ta progression est sauvegardée.\n\nJoue au clavier ou avec les boutons tactiles à l'écran. Disponible en 8 langues : anglais, français, allemand, espagnol, portugais du Brésil, italien, russe et turc.",
+    "controls_keyboard": "Se déplacer : flèches gauche / droite ou A / D. Sauter : flèche haut, W, Espace, Z ou K. Recommencer le niveau : R. Pause : P. Son activé / coupé : M. Suivant / valider : Entrée.",
+    "controls_touch": "Se déplacer : les boutons ◀ et ▶ en bas à gauche. Sauter : le bouton ▲ en bas à droite (maintenir pour sauter plus haut). Boutons à l'écran pour recommencer, la pause, le son et l'indice (ampoule).",
+    "category": "Plateforme",
+    "tags": [
+      "plateforme",
+      "troll",
+      "drôle",
+      "pièges",
+      "réflexion",
+      "2D",
+      "mignon",
+      "difficile"
+    ]
+  }
+}

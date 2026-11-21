@@ -81,6 +81,9 @@ async function boot(): Promise<void> {
   };
   await Portal.init().catch(() => undefined);
   Portal.loading(20);
+  // YouTube: the Playable may get the focus without a tap; sound must not wait for one (it stays silent while
+  // YouTube's audio is off: Portal.onMute above)
+  if (Portal.name === 'youtube') Audio.unlock();
   // the portal's store holds the save in those builds (same key, same format)
   const kv = Portal.storage();
   if (kv) Save.use(kv);
