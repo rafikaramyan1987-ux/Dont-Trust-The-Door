@@ -45,6 +45,8 @@ let failures = 0;
 
 function diff(a, b, path = '', out = []) {
   if (out.length > 8) return out;
+  if (a === undefined) a = null; // a drawing object made lazily (missing) vs reset (null): the same game state
+  if (b === undefined) b = null;
   if (JSON.stringify(a) === JSON.stringify(b)) return out;
   if (a && b && typeof a === 'object' && typeof b === 'object') {
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) diff(a[k], b[k], `${path}.${k}`, out);
@@ -65,6 +67,7 @@ for (let L = l0; L <= l1; L++) {
       flat(rle) { const s = []; for (const [n, k] of rle) for (let i = 0; i < n; i++) s.push(k); return s; },
       /** start the level (at checkpoint c, -1 = start) and play `steps` from the tick the start already ran */
       startAndPlay(level, c, steps, upto) {
+        T.release(); // no key may be held into the start's lead-in ticks
         T.start(level, null, c >= 0 ? c : false);
         let i = T.state().levelTick;
         while (i < upto && i < steps.length) { T.sim(steps[i++], 1); if (T.state().state !== 'play') break; }
@@ -92,6 +95,7 @@ for (let L = l0; L <= l1; L++) {
   const trace = await page.evaluate(({ L, n }) => {
     const T = window.__DTTD;
     const steps = window.__lastSteps;
+    T.release();
     T.start(L);
     const xs = [], cps = [];
     let i = T.state().levelTick;
@@ -120,7 +124,18 @@ for (let L = l0; L <= l1; L++) {
   // reference states: a fresh start at each checkpoint (and the level start)
   const refs = {};
   const refAt = async (c) => {
-    if (!refs[c]) refs[c] = await page.evaluate(({ L, c }) => { const T = window.__DTTD; T.start(L, null, c >= 0 ? c : false); while (T.state().levelTick < 6) T.sim('', 1); return { d: T.debugState(), s: T.state() }; }, { L, c });
+    // the reference: a respawn at checkpoint c from a fresh start there (nothing fired yet), reached the same way
+    // (a death, then pure simulation), so drawing-only values compare like for like
+    if (!refs[c]) refs[c] = await page.evaluate(({ L, c }) => {
+      const T = window.__DTTD;
+      T.release();
+      T.start(L, null, c >= 0 ? c : false);
+      T.kill();
+      let n = 0;
+      while (!(T.state().state === 'play' && T.state().levelTick === 0) && n++ < 400) T.sim('', 1);
+      while (T.state().levelTick < 6) T.sim('', 1);
+      return { d: T.debugState(), s: T.state() };
+    }, { L, c });
     return refs[c];
   };
 
@@ -172,7 +187,8 @@ for (let L = l0; L <= l1; L++) {
 
   // 2. the explorer
   const budget = EXPLORE_S * 60;
-  let explored = 0, seg = 0, stalls = 0, probed = 0;
+  let explored = 0, seg = 0, stalls = 0, probed = 0, exDeaths = 0, exWins = 0, exMaxX = 0;
+  const exCps = new Set();
   const seen = new Set();
   while (explored < budget) {
     const seed = L * 100003 + seg * 7919;
@@ -185,26 +201,32 @@ for (let L = l0; L <= l1; L++) {
       const pol = R.policy(r, true);
       const inputs = [];
       const pos = [];
-      let lastDeath = 0, d0 = T.state().deathsLevel, i = 0;
+      let lastDeath = 0, d0 = T.state().deathsLevel, i = 0, deaths = 0, maxX = 0, maxCp = T.state().cpIdx;
       for (; i < maxLen; i++) {
         const key = pol();
         inputs.push(key);
         T.sim(key, 1);
         const s = T.state();
         if (s.state === 'won') break;
-        if (s.deathsLevel !== d0) { d0 = s.deathsLevel; lastDeath = i; }
+        if (s.deathsLevel !== d0) { d0 = s.deathsLevel; lastDeath = i; deaths++; }
+        maxX = Math.max(maxX, s.x);
+        maxCp = Math.max(maxCp, s.cpIdx);
         pos.push([s.x, s.y]);
         if (i - lastDeath >= stallTicks && s.state === 'play') {
           const win = pos.slice(-stallTicks);
           const [cx, cy] = win[win.length - 1];
           if (win.every(([x, y]) => Math.abs(x - cx) <= 40 && Math.abs(y - cy) <= 40) && new Set(inputs.slice(-stallTicks)).size > 1)
-            return { k, inputs, stall: { x: cx, y: cy, cp: s.cpIdx, tick: i } };
+            return { k, inputs, deaths, maxX, maxCp, stall: { x: cx, y: cy, cp: s.cpIdx, tick: i } };
         }
       }
-      return { k, n: i };
+      return { k, n: i, deaths, maxX, maxCp, won: T.state().state === 'won' };
     }, { L, seed, maxLen: 1800, stallTicks: STALL_TICKS });
     explored += out.stall ? out.inputs.length : out.n;
     seg++;
+    exDeaths += out.deaths;
+    if (out.won) exWins++;
+    exMaxX = Math.max(exMaxX, out.maxX);
+    if (out.maxCp >= 0) exCps.add(out.maxCp);
     if (!out.stall) continue;
     stalls++;
     const key = `${Math.round(out.stall.x / 40)},${Math.round(out.stall.y / 40)},${out.stall.cp}`;
@@ -233,11 +255,12 @@ for (let L = l0; L <= l1; L++) {
   const res = {
     level: L, name: lvl.name, runTicks: trace.ticks, kills: killAt.length, respawns, distinctRespawnStates: verified.size,
     wonFromRespawn: [...verified.values()].filter(Boolean).length, exploreSeconds: Math.round(explored / 60), segments: seg,
-    stalls, stallsProbed: probed, issues, seconds: Math.round((Date.now() - t0) / 1000),
+    stalls, stallsProbed: probed, explorerDeaths: exDeaths, explorerExits: exWins, explorerCheckpoints: exCps.size,
+    explorerReach: Math.round((exMaxX / (lvl.map[0].length * 40)) * 100), issues, seconds: Math.round((Date.now() - t0) / 1000),
   };
   results.push(res);
   failures += issues.length;
-  console.log(`L${L} ${issues.length ? 'FAIL' : 'ok  '} ${killAt.length} forced deaths, ${respawns} respawns checked, ${verified.size} respawn states won, explorer ${res.exploreSeconds} s (${seg} segments, ${stalls} stalls, ${probed} probed) [${res.seconds} s]`);
+  console.log(`L${L} ${issues.length ? 'FAIL' : 'ok  '} ${killAt.length} forced deaths, ${respawns} respawns checked, ${verified.size} respawn states won, explorer ${res.exploreSeconds} s (${seg} segments, ${exDeaths} deaths, reach ${res.explorerReach}%, ${stalls} stalls, ${probed} probed) [${res.seconds} s]`);
   for (const i of issues.slice(0, 12)) console.log(`     ✗ ${i}`);
   if (issues.length > 12) console.log(`     … ${issues.length - 12} more`);
   await ctx.close();

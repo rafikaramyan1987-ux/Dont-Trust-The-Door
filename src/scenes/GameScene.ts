@@ -1072,6 +1072,7 @@ export class GameScene extends Phaser.Scene {
       this.fakeDoors.push({ door: this.track(new Door(this, x, y, true, fl).setDepth(2)), x, y, flipped: fl, group: null });
     }
     this.doorPath = [];
+    this.doorSpeed = 0; // a respawn starts with a resting door (the speed of a door run that a trap started is not kept)
     this.doorWait = 0;
     this.doorVx = 0;
 
