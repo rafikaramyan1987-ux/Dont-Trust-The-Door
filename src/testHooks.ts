@@ -110,6 +110,8 @@ export function installTestHooks(game: Phaser.Game): void {
     },
     release() { Input.bot = null; },
     kill() { scene().debugKill(); },
+    /** every plain gameplay value of the Game scene (tests/respawn.mjs) */
+    debugState() { return scene().debugState(); },
     snapCamera() { scene().debugSnapCamera(); },
     hint() { scene().debugHint(); },
     /** the bulb as the player presses it (portal builds: the rewarded-ad card) */

@@ -43,6 +43,9 @@ jobs:
       - run: node tests/run-selftest.mjs ${{ matrix.shard }}
       - if: matrix.shard == '--general'
         run: node tests/hint-fit.mjs
+      # death / respawn / no-soft-lock test of the shard's levels (tests/respawn.mjs)
+      - if: matrix.shard != '--general'
+        run: node tests/respawn.mjs ${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -2877,6 +2877,39 @@ export class GameScene extends Phaser.Scene {
     this.kill('test');
   }
 
+  /**
+   * Test hook: every plain gameplay value of the scene (numbers, flags, strings; arrays, sets, maps and plain objects
+   * of them, groups, triggers, extension state), Phaser objects left out. tests/respawn.mjs compares it after a
+   * forced death with a fresh start at the same checkpoint: everything after the checkpoint must be re-armed.
+   */
+  debugState(): Record<string, unknown> {
+    const prim = (v: unknown, depth: number): unknown => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v * 100) / 100 : String(v);
+      if (typeof v === 'boolean' || typeof v === 'string') return v;
+      if (depth <= 0 || typeof v !== 'object') return undefined;
+      if (v instanceof Set) return [...v].map((x) => prim(x, depth - 1)).filter((x) => x !== undefined).map((x) => JSON.stringify(x)).sort();
+      if (Array.isArray(v)) return v.map((x) => prim(x, depth - 1)).filter((x) => x !== undefined);
+      if (v instanceof Map) return Object.fromEntries([...v].map(([k, x]) => [String(k), prim(x, depth - 1)]).filter(([, x]) => x !== undefined));
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) return undefined; // Phaser objects and other class instances
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        const p = prim(x, depth - 1);
+        if (p !== undefined) out[k] = p;
+      }
+      return out;
+    };
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this as unknown as Record<string, unknown>)) {
+      if (k === 'lvl' || k === 'replay' || k === 'sys') continue;
+      const p = prim(v, 4);
+      if (p !== undefined) out[k] = p;
+    }
+    out.triggerFired = this.triggers.map((tr) => tr.fired);
+    return out;
+  }
+
   snapshot(): Snapshot {
     const b = this.pbody;
     return {
