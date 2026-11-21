@@ -317,6 +317,11 @@ export class GameScene extends Phaser.Scene {
   private emitConfetti!: Phaser.GameObjects.Particles.ParticleEmitter;
   private bubbles: { c: Phaser.GameObjects.Container; until: number; follow?: 'door' | 'hero' }[] = [];
   private offInput: (() => void) | null = null;
+  /** orientation of the last layout (null: none yet); a switch rebuilds open overlays for the new shape */
+  private layPortrait: boolean | null = null;
+  /** portrait: the level view and the control band, in UI coordinates */
+  private pview = { x: 0, y: 0, w: WORLD_W, h: WORLD_H };
+  private pband = { top: WORLD_H, bottom: WORLD_H };
 
 
   constructor() {
@@ -359,6 +364,7 @@ export class GameScene extends Phaser.Scene {
     this.bubbles = [];
     this.sysButtons = [];
     this.touchBtns = [];
+    this.layPortrait = null;
     // per-run objects (a scene restart destroys their images)
     this.storm = null;
     this.clone = null;
@@ -434,6 +440,18 @@ export class GameScene extends Phaser.Scene {
     this.uiCam.setSize(this.scale.width, this.scale.height);
     this.lay = applyLayout(this, this.uiCam);
     const L = this.lay;
+    const switched = this.layPortrait !== null && this.layPortrait !== L.portrait;
+    this.layPortrait = L.portrait;
+    if (L.portrait) this.layoutPortrait();
+    else this.layoutLandscape();
+    if (this.hintBox) this.hintBox.setPosition(WORLD_W / 2, this.hintBoxY(this.hintBox.getData('h') as number));
+    if (switched) this.rebuildOverlays();
+    if (this.overlay) this.overlay.getByName('dim')?.setData('fit', true);
+    this.fitDim();
+  }
+
+  private layoutLandscape(): void {
+    const L = this.lay;
     this.layoutWorldCamera();
 
     // system buttons: in the right pillar on touch layouts, top-right otherwise
@@ -459,10 +477,73 @@ export class GameScene extends Phaser.Scene {
     }
     this.levelText.setPosition(P > 60 ? -P / 2 : 24, P > 60 ? Math.max(L.top, 0) + 34 : 30);
     this.levelText.setOrigin(P > 60 ? 0.5 : 0, 0.5);
+    this.levelText.setScale(1 / RES);
     this.levelText.setWordWrapWidth(P > 60 ? (P - 10) * RES : 600 * RES);
+    this.deathIcon.setPosition(WORLD_W / 2 - 34, 34);
+    this.deathText.setPosition(WORLD_W / 2 + 8, 34);
+    this.quip.setPosition(WORLD_W / 2, 84);
     this.layoutTouch();
-    if (this.overlay) this.overlay.getByName('dim')?.setData('fit', true);
-    this.fitDim();
+  }
+
+  /**
+   * Portrait (YouTube build): a top bar (level name, system buttons), below it the level at the full screen width
+   * showing all 18 rows, below that the control band (◀ ▶ on the left, ▲ on the right). Spare height (very tall
+   * screens) becomes bars above and below, so the whole stack stays centred.
+   */
+  private layoutPortrait(): void {
+    const L = this.lay;
+    const W = this.scale.width, H = this.scale.height;
+    const css = W / Math.max(1, window.innerWidth || W); // device px per CSS px
+    const z = L.zoom;
+    const tb = 60 * css;
+    // the level view: between 12 and 20 tiles across, leaving the band at least 170 CSS px
+    const want = Phaser.Math.Clamp(H - tb - 250 * css, (W * ROWS) / 20, (W * ROWS) / 12);
+    const vh = Math.round(Math.max(60 * css, Math.min(H - tb - 170 * css, want)));
+    const band = Math.min(300 * css, H - tb - vh);
+    const y0 = Math.max(0, Math.round((H - tb - vh - band) / 2));
+    const vy = Math.round(y0 + tb);
+    this.setWorldView(0, vy, W, vh, vh / WORLD_H);
+    const ux = (px: number) => L.left + px / z, uy = (py: number) => L.top + py / z;
+    this.pview = { x: ux(0), y: uy(vy), w: W / z, h: vh / z };
+    this.pband = { top: uy(vy + vh), bottom: uy(vy + vh + band) };
+    // top bar: the system buttons (48 CSS px high) on the right, the level name in the room left of them
+    const bs = (48 * css) / z / 56;
+    const gap = (10 * css) / z;
+    const cy = uy(y0 + tb / 2);
+    let x = ux(W) - (8 * css) / z;
+    for (const b of [...this.sysButtons].reverse()) {
+      b.setScale(bs);
+      b.setPosition(x - (60 * bs) / 2, cy);
+      x -= 60 * bs + gap;
+    }
+    const lx = ux(0) + (10 * css) / z;
+    const room = Math.max(40, x - lx - gap);
+    this.levelText.setOrigin(0, 0.5).setPosition(lx, cy).setScale(1 / RES).setWordWrapWidth(room * RES);
+    const maxH = (tb - 6 * css) / z;
+    const k = Math.min(1, maxH / this.levelText.displayHeight, room / this.levelText.displayWidth);
+    this.levelText.setScale(k / RES);
+    // the death counter (and its quips) at the top of the level view, as in landscape
+    this.deathIcon.setPosition(WORLD_W / 2 - 34, this.pview.y + 30);
+    this.deathText.setPosition(WORLD_W / 2 + 8, this.pview.y + 30);
+    this.quip.setPosition(WORLD_W / 2, this.pview.y + 76);
+    this.layoutTouch();
+  }
+
+  /** Re-create open overlays after an orientation switch (their shape differs); the game state is untouched. */
+  private rebuildOverlays(): void {
+    const name = this.overlay?.name;
+    if (name === 'pause') {
+      this.closeOverlay();
+      this.paused = false;
+      this.togglePause();
+    } else if ((name === 'clear' || name === 'finalWin') && !this.adBusy) {
+      this.closeOverlay();
+      this.showComplete();
+    } else if (name === 'hintAd' && !this.adBusy) this.closeOverlay();
+    if (this.fakeClearUI) {
+      this.showFakeClear(false);
+      this.showFakeClear(true, true);
+    }
   }
 
   /**
@@ -471,22 +552,27 @@ export class GameScene extends Phaser.Scene {
    */
   private layoutWorldCamera(): void {
     const L = this.lay;
-    const cam = this.cameras.main;
     const W = this.scale.width, H = this.scale.height;
     const px = Math.round(L.pillar * L.zoom);
     const vw = Math.max(1, W - px * 2);
-    cam.setViewport(px, 0, vw, H);
     const tilesAcross = L.touch ? 22 : 32;
     const zoom = Math.max(H / WORLD_H, vw / (tilesAcross * TILE));
+    this.setWorldView(px, 0, vw, H, zoom);
+  }
+
+  /** Place the world camera's viewport (screen px) and its zoom; the scenery fills the viewport. */
+  private setWorldView(vx: number, vy: number, vw: number, vh: number, zoom: number): void {
+    const cam = this.cameras.main;
+    cam.setViewport(vx, vy, vw, vh);
     this.baseZoom = zoom;
     cam.setZoom(zoom * this.camZoomMul);
     cam.setBounds(0, 0, this.worldW, WORLD_H);
     const pad = 200;
-    this.bg.setPosition(vw / 2, H / 2).setDisplaySize(vw / zoom + pad, H / zoom + pad);
-    this.dots.setPosition(vw / 2, H / 2).setSize(vw / zoom + pad, H / zoom + pad);
+    this.bg.setPosition(vw / 2, vh / 2).setDisplaySize(vw / zoom + pad, vh / zoom + pad);
+    this.dots.setPosition(vw / 2, vh / 2).setSize(vw / zoom + pad, vh / zoom + pad);
     // scenery: clouds across the top, hills along the bottom (parallax in applyCamera)
-    this.clouds.setOrigin(0.5, 0).setPosition(vw / 2, H / 2 - H / zoom / 2 + 10).setSize(vw / zoom + pad, 300);
-    this.hills.setOrigin(0.5, 1).setPosition(vw / 2, H / 2 + H / zoom / 2).setSize(vw / zoom + pad, 260);
+    this.clouds.setOrigin(0.5, 0).setPosition(vw / 2, vh / 2 - vh / zoom / 2 + 10).setSize(vw / zoom + pad, 300);
+    this.hills.setOrigin(0.5, 1).setPosition(vw / 2, vh / 2 + vh / zoom / 2).setSize(vw / zoom + pad, 260);
     if (this.pbody) this.snapCamera();
   }
 
@@ -541,26 +627,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** A fake "level clear" card: looks real, blocks the view, does not stop the game. */
-  private showFakeClear(on: boolean): void {
+  private showFakeClear(on: boolean, quiet = false): void {
     if (!on) {
       this.fakeClearUI?.destroy();
       this.fakeClearUI = null;
       return;
     }
     if (this.fakeClearUI) return;
-    // looks like the real card, but sits high so the hero always stays visible
-    const cx = WORLD_W / 2, cy = 190;
+    // looks like the real card, but sits high so the hero always stays visible (portrait: at the top of the level view)
+    const P = !!this.lay?.portrait;
+    const pw = P ? 440 : 600, ph = P ? 220 : 250, fw = pw - 40, k = P ? 0.88 : 1;
+    const cx = WORLD_W / 2, cy = P ? this.pview.y + 12 + ph / 2 : 190;
     const c = this.add.container(0, 0).setDepth(180);
-    c.add(panel(this, cx, cy, 600, 250, 0xfff6d5));
-    c.add(fitText(label(this, cx, cy - 80, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 560));
-    c.add(fitText(label(this, cx, cy - 26, t('ui.fakeClear'), 46, '#ffd23f', 10), 560));
-    c.add(fitText(label(this, cx, cy + 26, t('ui.deathsLevel', { n: this.deathsLevel }), 26, '#ffffff', 7), 560));
-    const nx = new Button(this, cx + 170, cy + 82, { w: 190, h: 60, icon: 'play', text: t('ui.next'), fontSize: 28, color: '#6fd36b' }, () => this.say('say.lol', 'hero', 40));
+    c.add(panel(this, cx, cy, pw, ph, 0xfff6d5));
+    c.add(fitText(label(this, cx, cy - 80 * k, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), fw));
+    c.add(fitText(label(this, cx, cy - 26 * k, t('ui.fakeClear'), 46, '#ffd23f', 10), fw));
+    c.add(fitText(label(this, cx, cy + 26 * k, t('ui.deathsLevel', { n: this.deathsLevel }), 26, '#ffffff', 7), fw));
+    const nx = new Button(this, cx + (P ? 110 : 170), cy + 82 * k, { w: 190, h: 60, icon: 'play', text: t('ui.next'), fontSize: 28, color: '#6fd36b' }, () => this.say('say.lol', 'hero', 40));
     c.add(nx);
     this.uiLayer.add(c);
     this.cameras.main.ignore([c, nx]);
     this.fakeClearUI = c;
-    this.sfx('win');
+    if (!quiet) this.sfx('win');
   }
 
   private fitDim(): void {
@@ -634,19 +722,19 @@ export class GameScene extends Phaser.Scene {
     // thumb never releases ▲ early (a released jump is cut short). ◀ and ▶ may slide
     // into each other like a d-pad.
     const canvas = this.game.canvas;
-    const toUi = (t: Touch) => {
+    const toUi = (t: { clientX: number; clientY: number }) => {
       const r = canvas.getBoundingClientRect();
       const sx = this.scale.width / r.width, sy = this.scale.height / r.height;
       return this.uiCam.getWorldPoint((t.clientX - r.left) * sx, (t.clientY - r.top) * sy);
     };
-    const zoneAt = (t: Touch): keyof Keys | null => {
+    const zoneAt = (t: { clientX: number; clientY: number }): keyof Keys | null => {
       const wp = toUi(t);
       for (const b of this.touchBtns) if (wp.x >= b.zone.x && wp.x <= b.zone.x + b.zone.w && wp.y >= b.zone.y && wp.y <= b.zone.y + b.zone.h) return b.key;
       return null;
     };
     const onStart = (e: TouchEvent) => {
       Audio.unlock();
-      if (!this.lay?.touch || this.overlay) return;
+      if (!this.touchUI.visible || this.overlay) return;
       for (const t of Array.from(e.changedTouches)) {
         const k = zoneAt(t);
         if (k) this.touches.set(t.identifier, k);
@@ -667,17 +755,39 @@ export class GameScene extends Phaser.Scene {
       for (const t of Array.from(e.changedTouches)) this.touches.delete(t.identifier);
       this.syncTouch();
     };
+    // the mouse presses the same buttons (portrait shows them on every device); it is "finger" -1
+    const onMouseDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !this.touchUI.visible || this.overlay) return;
+      const k = zoneAt(e);
+      if (k) { this.touches.set(-1, k); this.syncTouch(); }
+    };
+    const onMouseMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const cur = this.touches.get(-1);
+      if (cur !== 'left' && cur !== 'right') return;
+      const k = zoneAt(e);
+      if (k === 'left' || k === 'right') { this.touches.set(-1, k); this.syncTouch(); }
+    };
+    const onMouseUp = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && this.touches.delete(-1)) this.syncTouch();
+    };
     const opts: AddEventListenerOptions = { passive: true };
     canvas.addEventListener('touchstart', onStart, opts);
     canvas.addEventListener('touchmove', onMove, opts);
     canvas.addEventListener('touchend', onEnd, opts);
     canvas.addEventListener('touchcancel', onEnd, opts);
+    canvas.addEventListener('pointerdown', onMouseDown);
+    window.addEventListener('pointermove', onMouseMove);
+    window.addEventListener('pointerup', onMouseUp);
     this.input.on('pointerdown', () => Audio.unlock());
     this.events.once('shutdown', () => {
       canvas.removeEventListener('touchstart', onStart);
       canvas.removeEventListener('touchmove', onMove);
       canvas.removeEventListener('touchend', onEnd);
       canvas.removeEventListener('touchcancel', onEnd);
+      canvas.removeEventListener('pointerdown', onMouseDown);
+      window.removeEventListener('pointermove', onMouseMove);
+      window.removeEventListener('pointerup', onMouseUp);
       this.touches.clear();
       Input.touch.left = Input.touch.right = Input.touch.jump = false;
     });
@@ -694,7 +804,8 @@ export class GameScene extends Phaser.Scene {
 
   private layoutTouch(): void {
     const L = this.lay;
-    this.touchUI.setVisible(L.touch);
+    this.touchUI.setVisible(L.touch || L.portrait);
+    if (L.portrait) { this.layoutPad(); return; }
     if (!L.touch) return;
     const P = L.pillar;
     const bottom = Math.min(L.bottom, WORLD_H + (L.bottom - WORLD_H)) - 14;
@@ -720,9 +831,13 @@ export class GameScene extends Phaser.Scene {
       const left0 = L.left + 6;
       draw(0, left0, bottom - bh, bw, bh);
       draw(1, left0 + bw + 8, bottom - bh, bw, bh);
-      const jw = P - 16;
-      draw(2, WORLD_W + 8, bottom - jw * 1.1, jw, jw * 1.1);
-      this.touchBtns[2].zone = { x: WORLD_W, y: L.top + usableH * 0.3, w: P + 20, h: usableH * 0.7 + 40 };
+      // ▲ fills the right pillar, but on very wide screens (up to 32:9) it stays below restart / pause
+      const jh = Math.min((P - 16) * 1.1, usableH * 0.45);
+      const jw = Math.min(P - 16, jh / 1.1);
+      draw(2, WORLD_W + (P - jw) / 2, bottom - jh, jw, jh);
+      const [, , , pause] = this.sysButtons;
+      const zy = Math.max(L.top + usableH * 0.3, pause.y + (pause.height * pause.scaleY) / 2 + 4);
+      this.touchBtns[2].zone = { x: WORLD_W, y: zy, w: P + 20, h: L.bottom - zy + 40 };
     } else {
       // Fallback (very wide level vs screen): corner buttons over the ground.
       const s = 110;
@@ -742,6 +857,40 @@ export class GameScene extends Phaser.Scene {
       draw(1, 200, WORLD_H - 70);
       draw(2, WORLD_W - 80, WORLD_H - 70);
     }
+  }
+
+  /** Portrait: big ◀ ▶ on the left of the control band, ▲ on the right; the hit zones run to the screen edges. */
+  private layoutPad(): void {
+    const L = this.lay;
+    const css = this.scale.width / Math.max(1, window.innerWidth || this.scale.width);
+    const u = css / L.zoom; // UI units per CSS px
+    const { top, bottom } = this.pband;
+    const m = 10 * u;
+    const sw = L.right - L.left;
+    const bh = Math.max(20, Math.min(bottom - top - 2 * m, 170 * u));
+    const bw = Math.min(100 * u, sw * 0.25), jw = Math.min(130 * u, sw * 0.32);
+    const by = top + (bottom - top - bh) / 2;
+    const lx = L.left + m, rx = lx + bw + m, jx = L.right - m - jw;
+    const draw = (i: number, x: number, w: number) => {
+      const b = this.touchBtns[i];
+      const g = b.img.getData('g') as Phaser.GameObjects.Graphics;
+      g.clear();
+      g.fillStyle(0x2b2d42, 0.5);
+      g.fillRoundedRect(-w / 2, -bh / 2, w, bh, Math.min(28, w / 3));
+      g.lineStyle(6, 0xffffff, 0.95);
+      g.strokeRoundedRect(-w / 2, -bh / 2, w, bh, Math.min(28, w / 3));
+      b.img.setPosition(x + w / 2, by + bh / 2);
+      b.img.setData('size', { w, h: bh });
+      b.img.setAlpha(0.7);
+    };
+    draw(0, lx, bw);
+    draw(1, rx, bw);
+    draw(2, jx, jw);
+    const mid = (rx + bw + jx) / 2;
+    const zy = top, zh = L.bottom - top + 40;
+    this.touchBtns[0].zone = { x: L.left - 40, y: zy, w: rx - m / 2 - (L.left - 40), h: zh };
+    this.touchBtns[1].zone = { x: rx - m / 2, y: zy, w: mid - (rx - m / 2), h: zh };
+    this.touchBtns[2].zone = { x: mid, y: zy, w: L.right + 40 - mid, h: zh };
   }
 
   private makeEmitters(): void {
@@ -1690,9 +1839,10 @@ export class GameScene extends Phaser.Scene {
     const c = this.makeOverlay();
     c.setName('hintAd');
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
-    c.add(panel(this, cx, cy, 560, 300, 0xfff6d5));
+    const P = this.lay.portrait;
+    c.add(panel(this, cx, cy, P ? 440 : 560, 300, 0xfff6d5));
     c.add(this.add.image(cx, cy - 92, 'icon-bulb').setScale(1.3 / RES));
-    c.add(fitText(label(this, cx, cy - 18, t('ui.hintAd'), 30, '#ffd23f', 8), 500));
+    c.add(fitText(label(this, cx, cy - 18, t('ui.hintAd'), 30, '#ffd23f', 8), P ? 400 : 500));
     const no = new Button(this, cx - 110, cy + 80, { w: 150, h: 64, icon: 'left', color: '#ff8a5b' }, () => {
       if (this.adBusy) return;
       this.closeOverlay();
@@ -1761,6 +1911,7 @@ export class GameScene extends Phaser.Scene {
     c.setData('w', w);
     this.uiLayer.add(c);
     c.setData('h', h);
+    c.setY(this.hintBoxY(h));
     c.setData('maxW', box);
     this.hintBox = c;
     c.setScale(0.3);
@@ -1773,6 +1924,11 @@ export class GameScene extends Phaser.Scene {
     const tx = Math.floor(this.pbody.center.x / TILE);
     for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 10000 + tx)) return true;
     return false;
+  }
+
+  /** The hint box's centre y: high on the screen (portrait: at the top of the level view). */
+  private hintBoxY(h: number): number {
+    return this.lay?.portrait ? this.pview.y + 14 + h / 2 : 150;
   }
 
   /** Widest hint box that fits the visible screen (phones are narrow). */
@@ -2375,9 +2531,11 @@ export class GameScene extends Phaser.Scene {
     this.sfx('death');
     const q = this.lvl.deathQuips;
     if (q && q.length) {
-      this.quip.setText(t(q[(this.deathsLevel - 1) % q.length])).setAlpha(1).setScale(0.6 / RES);
+      this.quip.setText(t(q[(this.deathsLevel - 1) % q.length])).setAlpha(1).setScale(1 / RES);
+      const qs = Math.min(1, (this.lay.right - this.lay.left - 30) / this.quip.displayWidth) / RES;
+      this.quip.setScale(0.6 * qs);
       this.tweens.killTweensOf(this.quip);
-      this.tweens.add({ targets: this.quip, scale: 1 / RES, duration: 160, ease: 'Back.Out' });
+      this.tweens.add({ targets: this.quip, scale: qs, duration: 160, ease: 'Back.Out' });
       this.tweens.add({ targets: this.quip, alpha: 0, delay: 1100, duration: 300 });
     }
   }
@@ -2415,20 +2573,24 @@ export class GameScene extends Phaser.Scene {
     const last = this.levelNum >= LEVELS.length;
     if (last) { this.showFinalWin(); return; }
     const c = this.makeOverlay();
+    c.setName('clear');
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
-    c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
-    const t1 = fitText(label(this, cx, cy - 130, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
-    const msg = fitText(label(this, cx, cy - 64, t(this.lvl.winMessage), 46, '#ffd23f', 10), 600);
+    // portrait: a narrower, taller card with the buttons in two rows
+    const P = this.lay.portrait;
+    const fw = P ? 400 : 600, ty = P ? -60 : 0;
+    c.add(panel(this, cx, cy, P ? 440 : 640, P ? 540 : 420, 0xfff6d5));
+    const t1 = fitText(label(this, cx, cy - 130 + ty, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), fw);
+    const msg = fitText(label(this, cx, cy - 64 + ty, t(this.lvl.winMessage), 46, '#ffd23f', 10), fw);
     const d = this.deathsLevel;
-    const t2 = fitText(label(this, cx, cy + 6, d === 0 ? t('ui.deathsNone') : t('ui.deathsLevel', { n: d }), 28, '#ffffff', 7), 600);
-    const t3 = fitText(label(this, cx, cy + 46, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 22, '#fff6d5', 6), 600);
+    const t2 = fitText(label(this, cx, cy + 6 + ty, d === 0 ? t('ui.deathsNone') : t('ui.deathsLevel', { n: d }), 28, '#ffffff', 7), fw);
+    const t3 = fitText(label(this, cx, cy + 46 + ty, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 22, '#fff6d5', 6), fw);
     c.add([t1, msg, t2, t3]);
     const ms = msg.scale;
     msg.setScale(0.2);
     this.tweens.add({ targets: msg, scale: ms, duration: 320, ease: 'Back.Out' });
-    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
-    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel()).setName('clearRetry');
-    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear('next', () => this.nextLevel())).setName('clearNext');
+    const bLv = new Button(this, P ? cx - 100 : cx - 200, cy + (P ? 196 : 130), { w: P ? 186 : 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
+    const bRe = new Button(this, P ? cx + 100 : cx - 15, cy + (P ? 196 : 130), { w: P ? 186 : 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel()).setName('clearRetry');
+    const bNx = new Button(this, P ? cx : cx + 190, cy + (P ? 104 : 130), { w: P ? 300 : 190, h: P ? 80 : 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear('next', () => this.nextLevel())).setName('clearNext');
     c.add([bLv, bRe, bNx]);
   }
 
@@ -2437,22 +2599,25 @@ export class GameScene extends Phaser.Scene {
     const c = this.makeOverlay();
     c.setName('finalWin');
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
-    c.add(panel(this, cx, cy, 760, 500, 0x2b2d42));
+    const P = this.lay.portrait;
+    const fw = P ? 400 : 700;
+    c.add(panel(this, cx, cy, P ? 440 : 760, P ? 600 : 500, 0x2b2d42));
     for (let i = 0; i < 5; i++) {
-      const st = this.add.image(cx + (i - 2) * 92, cy - 170 + Math.abs(i - 2) * 14, 'icon-star').setScale(1.5 / RES).setTint(0xffd23f);
+      const st = this.add.image(cx + (i - 2) * (P ? 76 : 92), cy - (P ? 210 : 170) + Math.abs(i - 2) * 14, 'icon-star').setScale((P ? 1.25 : 1.5) / RES).setTint(0xffd23f);
       this.tweens.add({ targets: st, angle: { from: -12, to: 12 }, duration: 520 + i * 60, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
       c.add(st);
     }
-    const title = fitText(label(this, cx, cy - 78, t('ui.beatGame'), 58, '#ffd23f', 12), 700);
-    const sub = fitText(label(this, cx, cy - 4, t('ui.finalSub', { n: LEVELS.length }), 26, '#fff6d5', 6), 700);
-    const d = fitText(label(this, cx, cy + 56, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 26, '#ffffff', 7), 700);
+    const ty = P ? -50 : 0;
+    const title = fitText(label(this, cx, cy - 78 + ty, t('ui.beatGame'), 58, '#ffd23f', 12), fw);
+    const sub = fitText(label(this, cx, cy - 4 + ty, t('ui.finalSub', { n: LEVELS.length }), 26, '#fff6d5', 6), fw);
+    const d = fitText(label(this, cx, cy + 56 + ty, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 26, '#ffffff', 7), fw);
     c.add([title, sub, d]);
     const ts = title.scale;
     title.setScale(0.2);
     this.tweens.add({ targets: title, scale: ts, duration: 420, ease: 'Back.Out' });
     this.time.addEvent({ delay: 500, repeat: 8, callback: () => this.emitConfetti.emitParticleAt(this.cameras.main.midPoint.x + Phaser.Math.Between(-400, 400), this.cameras.main.worldView.y + 40, 30) });
-    const bLv = new Button(this, cx - 140, cy + 160, { w: 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
-    const bMe = new Button(this, cx + 140, cy + 160, { w: 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear('menu', () => this.toTitle())).setName('clearMenu');
+    const bLv = new Button(this, P ? cx : cx - 140, cy + (P ? 210 : 160), { w: P ? 300 : 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
+    const bMe = new Button(this, P ? cx : cx + 140, cy + (P ? 120 : 160), { w: P ? 300 : 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear('menu', () => this.toTitle())).setName('clearMenu');
     c.add([bLv, bMe]);
   }
 
@@ -2513,9 +2678,11 @@ export class GameScene extends Phaser.Scene {
     this.paused = true;
     Portal.gameplay(false);
     const c = this.makeOverlay();
+    c.setName('pause');
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
-    c.add(panel(this, cx, cy, 600, 500, 0xfff6d5));
-    c.add(fitText(label(this, cx, cy - 196, t('ui.paused'), 44, '#ffd23f', 9), 540));
+    const P = this.lay.portrait;
+    c.add(panel(this, cx, cy, P ? 440 : 600, 500, 0xfff6d5));
+    c.add(fitText(label(this, cx, cy - 196, t('ui.paused'), 44, '#ffd23f', 9), P ? 400 : 540));
     const items: [string, string, string, () => void][] = [
       ['play', t('ui.resume'), '#6fd36b', () => this.togglePause()],
       ['restart', t('ui.restart'), '#9f7bd8', () => this.restartLevel()],
@@ -2658,7 +2825,8 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.smudgeImg) {
       const L = this.lay;
-      this.smudgeImg.setVisible(this.camSmudge).setPosition(WORLD_W * 0.5 + (L.right - L.left) * 0.2, WORLD_H * 0.58).setScale(1.25 / RES);
+      if (L.portrait) this.smudgeImg.setVisible(this.camSmudge).setPosition(WORLD_W * 0.5 + this.pview.w * 0.2, this.pview.y + this.pview.h * 0.58).setScale(0.8 / RES);
+      else this.smudgeImg.setVisible(this.camSmudge).setPosition(WORLD_W * 0.5 + (L.right - L.left) * 0.2, WORLD_H * 0.58).setScale(1.25 / RES);
     }
   }
 

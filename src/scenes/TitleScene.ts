@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { WORLD_W, PALETTES, TILE } from '../config';
-import { applyLayout, Layout } from '../layout';
+import { applyLayout, Layout, isPortrait } from '../layout';
 import { Button, label, fitText } from '../ui';
 import { t } from '../i18n';
 import { openLanguagePicker, currentLangName } from '../langPicker';
@@ -21,6 +21,9 @@ export class TitleScene extends Phaser.Scene {
   private lay!: Layout;
   private muteBtn!: Button;
   private starting = false;
+  private skull: Phaser.GameObjects.GameObject[] = [];
+  /** laid out for portrait (a switch of orientation re-creates the screen) */
+  private portrait = false;
 
   constructor() {
     super('Title');
@@ -28,6 +31,9 @@ export class TitleScene extends Phaser.Scene {
 
   create(): void {
     this.starting = false;
+    // portrait (YouTube build): the same screen arranged in a narrow column
+    const P = (this.portrait = isPortrait(this));
+    this.skull = [];
     this.bg = this.add.image(0, 0, 'bg-0').setOrigin(0).setDepth(-20);
     this.dots = this.add.tileSprite(0, 0, 64, 64, 'dots-0').setOrigin(0).setDepth(-19).setTileScale(1 / RES);
 
@@ -43,27 +49,29 @@ export class TitleScene extends Phaser.Scene {
     // Title letters with a bouncy wave
     const lines = ["DON'T TRUST", 'THE DOOR'];
     lines.forEach((line, li) => {
-      const size = li === 0 ? 92 : 112;
+      const size = P ? (li === 0 ? 58 : 72) : li === 0 ? 92 : 112;
       const color = li === 0 ? '#fff6d5' : '#ffd23f';
       const spacing = size * 0.62;
       const startX = WORLD_W / 2 - ((line.length - 1) * spacing) / 2;
       [...line].forEach((ch, i) => {
         if (ch === ' ') return;
-        const t = label(this, startX + i * spacing, 130 + li * 120, ch, size, color, 14);
+        const t = label(this, startX + i * spacing, P ? 70 + li * 82 : 130 + li * 120, ch, size, color, P ? 10 : 14);
         t.setAngle((i % 2 ? 1 : -1) * 3);
         this.tweens.add({ targets: t, y: t.y - 10, duration: 700, delay: i * 70 + li * 300, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
       });
     });
-    fitText(label(this, WORLD_W / 2, 330, t('ui.tagline'), 24, '#2b2d42', 0), 900).setAlpha(0.75);
+    const tag = label(this, WORLD_W / 2, P ? 228 : 330, t('ui.tagline'), P ? 22 : 24, '#2b2d42', 0).setAlpha(0.75);
+    if (P) tag.setWordWrapWidth(420 * RES);
+    fitText(tag, P ? 420 : 900);
 
-    this.hero = new Hero(this, 330, 15 * TILE + 1).setScale(2.2);
-    this.door = new Door(this, 960, 15 * TILE, false, false).setScale(2);
+    this.hero = new Hero(this, P ? 470 : 330, 15 * TILE + 1).setScale(P ? 1.8 : 2.2);
+    this.door = new Door(this, P ? 830 : 960, 15 * TILE, false, false).setScale(P ? 1.2 : 2);
     this.time.addEvent({ delay: 2200, loop: true, callback: () => this.door.wink() });
     this.time.addEvent({ delay: 2200, startAt: 1100, loop: true, callback: () => this.tweens.add({ targets: this.hero, y: this.hero.y - 30, duration: 180, yoyo: true, ease: 'Quad.Out' }) });
 
-    new Button(this, WORLD_W / 2, 450, { w: 320, h: 92, icon: 'play', text: t('ui.play'), fontSize: 46, color: '#6fd36b' }, () => this.play()).setName('play');
-    new Button(this, WORLD_W / 2 - 140, 560, { w: 250, h: 62, icon: 'menu', text: t('ui.levels'), fontSize: 26, color: '#5b8cff' }, () => this.scene.start('Select')).setName('levels');
-    new Button(this, WORLD_W / 2 + 140, 560, { w: 250, h: 62, icon: 'globe', text: currentLangName(), fontSize: 24, color: '#41c6c0' }, () => {
+    new Button(this, WORLD_W / 2, P ? 318 : 450, { w: 320, h: 92, icon: 'play', text: t('ui.play'), fontSize: 46, color: '#6fd36b' }, () => this.play()).setName('play');
+    new Button(this, P ? WORLD_W / 2 : WORLD_W / 2 - 140, P ? 414 : 560, { w: P ? 300 : 250, h: P ? 70 : 62, icon: 'menu', text: t('ui.levels'), fontSize: 26, color: '#5b8cff' }, () => this.scene.start('Select')).setName('levels');
+    new Button(this, P ? WORLD_W / 2 : WORLD_W / 2 + 140, P ? 496 : 560, { w: P ? 300 : 250, h: P ? 70 : 62, icon: 'globe', text: currentLangName(), fontSize: 24, color: '#41c6c0' }, () => {
       openLanguagePicker(this, null, () => this.scene.restart());
     }).setName('language');
     this.muteBtn = new Button(this, WORLD_W - 60, 50, { w: 64, h: 58, icon: Audio.muted ? 'mute' : 'sound', color: '#ff8a5b' }, () => {
@@ -73,10 +81,11 @@ export class TitleScene extends Phaser.Scene {
     this.muteBtn.setVisible(Portal.policy.ownMuteButton);
     const s = Save.get();
     if (s.totalDeaths > 0) {
-      this.add.image(70, 50, 'skull').setScale(1 / RES);
-      label(this, 100, 50, String(s.totalDeaths), 30, '#fff6d5', 7).setOrigin(0, 0.5);
+      this.skull = [this.add.image(70, 50, 'skull').setScale(1 / RES), label(this, 100, 50, String(s.totalDeaths), 30, '#fff6d5', 7).setOrigin(0, 0.5)];
     }
-    fitText(label(this, WORLD_W / 2, 690, t('ui.controlsHelp'), 18, '#2b2d42', 0), 1100).setAlpha(0.6);
+    const help = label(this, WORLD_W / 2, P ? 672 : 690, t('ui.controlsHelp'), 18, '#2b2d42', 0).setAlpha(0.6);
+    if (P) help.setWordWrapWidth(420 * RES);
+    fitText(help, P ? 420 : 1100);
 
     this.relayout();
     this.scale.on('resize', this.relayout, this);
@@ -100,8 +109,16 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private relayout(): void {
+    if (isPortrait(this) !== this.portrait) { this.scene.restart(); return; }
     this.lay = applyLayout(this);
     const L = this.lay;
+    if (this.portrait) {
+      // the sound button and the death counter sit in the screen's top corners
+      this.muteBtn.setPosition(L.right - 48, L.top + 46);
+      const [ic, tx] = this.skull as [Phaser.GameObjects.Image, Phaser.GameObjects.Text];
+      ic?.setPosition(L.left + 40, L.top + 46);
+      tx?.setPosition(L.left + 70, L.top + 46);
+    }
     this.bg.setPosition(L.left - 50, L.top - 50).setDisplaySize(L.right - L.left + 100, L.bottom - L.top + 100);
     this.dots.setPosition(L.left - 50, L.top - 50).setSize(L.right - L.left + 100, L.bottom - L.top + 100);
   }
