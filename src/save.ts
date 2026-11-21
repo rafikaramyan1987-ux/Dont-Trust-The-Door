@@ -51,9 +51,12 @@ function load(): SaveData {
   }
 }
 
+/** false where the portal forbids keeping the language in the save (YouTube Playables): it stays in memory */
+let persistLang = true;
+
 function persist(): void {
   try {
-    backend().setItem(KEY, JSON.stringify(data));
+    backend().setItem(KEY, JSON.stringify(persistLang ? data : { ...data, lang: null }));
   } catch {
     /* storage unavailable: keep playing with in-memory progress */
   }
@@ -64,6 +67,12 @@ export const Save = {
   use(kv: KeyValueStore | null): void {
     store = kv;
     data = load();
+    if (!persistLang) data.lang = null;
+  },
+  /** keep the chosen language in the save or only for this session */
+  persistLanguage(on: boolean): void {
+    persistLang = on;
+    if (!on) data.lang = null;
   },
   /** reload from the store (tests) */
   reload(): void {

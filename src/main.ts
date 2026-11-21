@@ -16,9 +16,12 @@ import '@fontsource/nunito/latin-ext-900.css';
 import '@fontsource/nunito/cyrillic-800.css';
 import '@fontsource/nunito/cyrillic-900.css';
 
-/** The language: the player's own 🌐 choice, else the portal's (if supported), else the browser's, else English. */
+/**
+ * The language: the player's own 🌐 choice, else the portal's (if supported), else the browser's where the portal's
+ * rules allow it (Playgama, CrazyGames and YouTube: never), else English.
+ */
 function applyLanguage(): void {
-  const browser = navigator.languages ?? [navigator.language];
+  const browser = Portal.policy.browserLanguage ? (navigator.languages ?? [navigator.language]) : [];
   const portal = Portal.locale();
   setLang(Save.get().lang ?? detectLang(portal ? [portal, ...browser] : browser));
   document.title = t('ui.title');
@@ -32,9 +35,11 @@ function applyLanguage(): void {
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
 const size = () => ({ w: Math.max(1, Math.round(window.innerWidth * dpr)), h: Math.max(1, Math.round(window.innerHeight * dpr)) });
 
+let game: Phaser.Game | null = null;
+
 function start(): void {
   const s = size();
-  const game = new Phaser.Game({
+  const g = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
     backgroundColor: '#2b2d42',
@@ -48,19 +53,28 @@ function start(): void {
     scene: [BootScene, TitleScene, SelectScene, GameScene],
     banner: false,
   });
+  game = g;
 
   const onResize = () => {
     const n = size();
-    if (n.w !== game.scale.width || n.h !== game.scale.height) game.scale.resize(n.w, n.h);
+    if (n.w !== g.scale.width || n.h !== g.scale.height) g.scale.resize(n.w, n.h);
   };
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', () => setTimeout(onResize, 150));
 
-  if (Input.isTest) installTestHooks(game);
+  if (Input.isTest) installTestHooks(g);
 }
 
 async function boot(): Promise<void> {
-  Portal.onPause = (p) => (PortalState.paused = p);
+  Portal.onPause = (p) => {
+    PortalState.paused = p;
+    // YouTube: a pause stops everything (loop, rendering), not only the level
+    if (Portal.policy.pauseLoop && game) {
+      if (p) game.loop.sleep();
+      else game.loop.wake();
+    }
+  };
+  Save.persistLanguage(Portal.policy.persistLanguage);
   Portal.onMute = (m) => {
     PortalState.muted = m;
     Audio.setSysMuted(m);

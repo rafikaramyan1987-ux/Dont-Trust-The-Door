@@ -270,7 +270,7 @@
   "ui.back": "Volver",
   "ui.beatGame": "¡LE GANASTE A LA PUERTA!",
   "ui.chooseLevel": "ELIGE UN NIVEL",
-  "ui.controlsHelp": "Flechas / WASD para moverte · Espacio para saltar · Esc para pausar",
+  "ui.controlsHelp": "Flechas / WASD para moverte · Espacio para saltar · P para pausar",
   "ui.deathsLevel": "Muertes en este nivel: {n}",
   "ui.deathsNone": "Muertes: 0 — ¡¿ni una sola vez?!",
   "ui.deathsTotal": "Muertes totales: {n}",

@@ -1,4 +1,5 @@
 // Unified input: keyboard + on-screen touch buttons + (test only) scripted bot.
+import { Portal } from './platform';
 
 export interface Keys {
   left: boolean;
@@ -6,7 +7,7 @@ export interface Keys {
   jump: boolean;
 }
 
-type Cmd = 'pause' | 'restart' | 'mute' | 'confirm' | 'back';
+type Cmd = 'pause' | 'restart' | 'mute' | 'confirm' | 'back' | 'esc';
 
 const kb = { left: false, right: false, jump: false };
 const held = new Set<string>();
@@ -29,9 +30,15 @@ function emit(c: Cmd): void {
 window.addEventListener('keydown', (e) => {
   if ([...LEFT, ...RIGHT, ...JUMP, 'ArrowDown'].includes(e.code)) e.preventDefault();
   if (!e.repeat) {
-    if (e.code === 'Escape' || e.code === 'KeyP') emit('pause');
+    // Escape per portal rules: the web pauses with it, YouTube only closes the pause menu (never blocked),
+    // Playgama / CrazyGames do not use it
+    if (e.code === 'Escape') {
+      if (Portal.policy.esc === 'pause') emit('pause');
+      else if (Portal.policy.esc === 'close') emit('esc');
+    }
+    if (e.code === 'KeyP') emit('pause');
     if (e.code === 'KeyR') emit('restart');
-    if (e.code === 'KeyM') emit('mute');
+    if (e.code === 'KeyM' && Portal.policy.ownMuteButton) emit('mute');
     if (e.code === 'Enter' || e.code === 'Space') emit('confirm');
     if (e.code === 'Backspace') emit('back');
   }

@@ -5,20 +5,25 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 export const SLUG = 'dont-trust-the-door';
-export const VERSION = 1;
 export const SDK = {
   playgama: 'https://bridge.playgama.com/v2/stable/playgama-bridge.js',
   gamepix: 'https://integration.gamepix.com/sdk/v3/gamepix.sdk.js',
   y8: 'https://cdn.y8.com/minimal-sdk/2-0/y8.min.js',
   crazygames: 'https://sdk.crazygames.com/crazygames-sdk-v3.js',
+  gamedistribution: 'https://html5.api.gamedistribution.com/main.min.js',
+  youtube: 'https://www.youtube.com/game_api/v1',
 };
+export const PORTALS = Object.keys(SDK);
 /** strings that name another portal: none may appear in a portal's zip */
-export const PORTAL_MARKS = { playgama: 'playgama', gamepix: 'gamepix', y8: 'cdn.y8.com', crazygames: 'crazygames' };
+export const PORTAL_MARKS = { playgama: 'playgama', gamepix: 'gamepix', y8: 'cdn.y8.com', crazygames: 'crazygames', gamedistribution: 'gamedistribution', youtube: 'game_api/v1' };
 
 /** URLs that appear in Phaser's bundled code as text only (licence comments, SVG namespace, banner): never requested */
 export const LIBRARY_TEXT = ['https://opensource.org', 'https://github.com', 'https://phaser.io', 'http://prunegames.com', 'http://steffe.se', 'http://www.w3.org'];
 
-export const zipPath = (portal) => resolve(`submission-${portal}/${SLUG}-${portal}-v${VERSION}.zip`);
+/** release/<portal>/<slug>-<portal>.zip: the file to upload */
+export const zipPath = (portal) => resolve(`release/${portal}/${SLUG}-${portal}.zip`);
+/** release/store/<portal>/: that portal's listing images and videos */
+export const storeDir = (portal) => resolve(`release/store/${portal}`);
 export const distDir = (portal) => resolve(`dist-${portal}`);
 
 /** zip dist-<portal>/ with index.html at the root (no directory entries, no extra attributes) */
@@ -64,7 +69,7 @@ export function checker(title) {
  */
 export function commonChecks(c, portal, { maxMB }) {
   const zip = zipPath(portal);
-  c.check(!existsSync(zip), `${zip} missing: run \`npm run submission:${portal}\``, `zip: ${zip}`);
+  c.check(!existsSync(zip), `${zip} missing: run \`npm run release -- ${portal}\``, `zip: ${zip}`);
   if (!existsSync(zip)) c.done();
   const size = statSync(zip).size;
   c.check(size > maxMB * 1024 * 1024, `zip is ${(size / 1048576).toFixed(1)} MB, over ${maxMB} MB`, `${(size / 1024).toFixed(0)} KB, under the ${maxMB} MB limit`);
@@ -82,7 +87,7 @@ export function commonChecks(c, portal, { maxMB }) {
   const refs = [...html.matchAll(/\s(?:src|href|data-src)="([^"]*)"/g)].map((m) => m[1]).filter((r) => r !== sdk);
   const bad = refs.filter((r) => !r.startsWith('./') && !r.startsWith('data:') && !r.startsWith('#'));
   c.check(bad.length, `index.html references non-relative paths: ${bad.join(', ')}`, `index.html: ${refs.length} game references, all relative (./)`);
-  c.check(!html.includes(`src="${sdk}"`), `index.html does not load ${sdk}`, `index.html loads the SDK from ${new URL(sdk).origin}`);
+  c.check(!html.includes(`src="${sdk}"`) && !html.includes(`'${sdk}'`), `index.html does not load ${sdk}`, `index.html loads the SDK from ${new URL(sdk).origin}`);
   const text = files.filter((f) => /\.(html|js|css|json)$/.test(f)).map((f) => [f.slice(dir.length + 1), readFileSync(f, 'utf8')]);
   const code = text.map(([, s]) => s).join('\n');
   // every absolute URL in the code: only the SDK's origin. LIBRARY_TEXT are Phaser's own non-loading strings (licence
@@ -95,7 +100,7 @@ export function commonChecks(c, portal, { maxMB }) {
   const hits = [];
   for (const [p, mark] of Object.entries(PORTAL_MARKS)) if (p !== portal) for (const [f, s] of text) if (s.toLowerCase().includes(mark)) hits.push(`${f}: "${mark}"`);
   c.check(hits.length, `another portal named in the zip: ${hits.join('; ')}`, `no other portal's SDK or name in the zip`);
-  c.check(files.some((f) => /(gamepix\.sdk|y8\.min|crazygames-sdk|playgama-bridge)[^/]*\.js$/i.test(f)), 'a copy of a portal SDK is bundled', 'no bundled copy of any portal SDK (loaded from the portal only)');
+  c.check(files.some((f) => /(gamepix\.sdk|y8\.min|crazygames-sdk|playgama-bridge|gamedistribution|game_api)[^/]*\.js$/i.test(f)), 'a copy of a portal SDK is bundled', 'no bundled copy of any portal SDK (loaded from the portal only)');
   return { dir, html, files, code, entries };
 }
 
@@ -104,7 +109,7 @@ export function mediaChecks(c, folder, list) {
   for (const [file, w, h, maxBytes] of list) {
     const f = join(folder, file);
     if (!existsSync(f)) {
-      c.check(true, `${f} missing (npm run media:portals)`, '');
+      c.check(true, `${f} missing (npm run store)`, '');
       continue;
     }
     const size = statSync(f).size;

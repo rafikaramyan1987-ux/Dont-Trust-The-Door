@@ -20,12 +20,14 @@ export class TitleScene extends Phaser.Scene {
   private door!: Door;
   private lay!: Layout;
   private muteBtn!: Button;
+  private starting = false;
 
   constructor() {
     super('Title');
   }
 
   create(): void {
+    this.starting = false;
     this.bg = this.add.image(0, 0, 'bg-0').setOrigin(0).setDepth(-20);
     this.dots = this.add.tileSprite(0, 0, 64, 64, 'dots-0').setOrigin(0).setDepth(-19).setTileScale(1 / RES);
 
@@ -68,6 +70,7 @@ export class TitleScene extends Phaser.Scene {
       Audio.unlock();
       this.muteBtn.setIcon(Audio.toggleMute() ? 'mute' : 'sound');
     });
+    this.muteBtn.setVisible(Portal.policy.ownMuteButton);
     const s = Save.get();
     if (s.totalDeaths > 0) {
       this.add.image(70, 50, 'skull').setScale(1 / RES);
@@ -86,9 +89,14 @@ export class TitleScene extends Phaser.Scene {
 
   private play(): void {
     Audio.unlock();
+    if (this.starting) return;
+    this.starting = true;
     const s = Save.get();
     const next = Math.min(s.unlocked, LEVELS.length);
-    this.scene.start('Game', { level: next });
+    // GameDistribution: its pre-roll on the Play button (a no-op on the other builds)
+    void Portal.preroll().catch(() => undefined).then(() => {
+      if (this.sys.isActive()) this.scene.start('Game', { level: next });
+    });
   }
 
   private relayout(): void {

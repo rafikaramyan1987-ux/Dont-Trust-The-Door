@@ -12,6 +12,7 @@ import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
 import { Portal, PortalState } from '../platform';
+import type { AdPlace } from '../platform/types';
 import { EXTS } from '../game/ext';
 import type { MoveCtx } from '../game/ext/types';
 import { applyLayout, Layout } from '../layout';
@@ -410,7 +411,8 @@ export class GameScene extends Phaser.Scene {
       if (c === 'pause') this.togglePause();
       else if (c === 'restart' && !this.overlay) this.restartLevel();
       else if (c === 'mute') this.toggleMute();
-      else if (c === 'confirm' && this.overlay && this.state === 'won') this.leaveClear(() => this.nextLevel());
+      else if (c === 'esc' && this.paused && this.overlay && this.state !== 'won') this.togglePause();
+      else if (c === 'confirm' && this.overlay && this.state === 'won') this.leaveClear('next', () => this.nextLevel());
     });
 
     this.buildLevel();
@@ -590,6 +592,7 @@ export class GameScene extends Phaser.Scene {
     if (this.hintUsed) { this.hintBtn.enabled = false; this.hintBtn.setAlpha(0.35); }
     mk('restart', () => this.restartLevel(), '#ff6a3d');
     this.muteBtn = mk(Audio.muted ? 'mute' : 'sound', () => this.toggleMute());
+    this.muteBtn.setVisible(Portal.policy.ownMuteButton);
     mk('pause', () => this.togglePause());
     this.updateDeathText(false);
   }
@@ -2397,7 +2400,7 @@ export class GameScene extends Phaser.Scene {
     this.state = 'won';
     this.stateT = 0;
     Save.complete(this.lvl.id, LEVELS.length);
-    Portal.levelCompleted(this.levelNum);
+    Portal.levelCompleted(this.levelNum, this.levelNum >= LEVELS.length);
     Portal.gameplay(false);
     this.pbody.setVelocity(0, 0);
     this.pbody.enable = false;
@@ -2423,9 +2426,9 @@ export class GameScene extends Phaser.Scene {
     const ms = msg.scale;
     msg.setScale(0.2);
     this.tweens.add({ targets: msg, scale: ms, duration: 320, ease: 'Back.Out' });
-    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
+    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
     const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel()).setName('clearRetry');
-    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear(() => this.nextLevel())).setName('clearNext');
+    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear('next', () => this.nextLevel())).setName('clearNext');
     c.add([bLv, bRe, bNx]);
   }
 
@@ -2448,8 +2451,8 @@ export class GameScene extends Phaser.Scene {
     title.setScale(0.2);
     this.tweens.add({ targets: title, scale: ts, duration: 420, ease: 'Back.Out' });
     this.time.addEvent({ delay: 500, repeat: 8, callback: () => this.emitConfetti.emitParticleAt(this.cameras.main.midPoint.x + Phaser.Math.Between(-400, 400), this.cameras.main.worldView.y + 40, 30) });
-    const bLv = new Button(this, cx - 140, cy + 160, { w: 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
-    const bMe = new Button(this, cx + 140, cy + 160, { w: 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear(() => this.toTitle())).setName('clearMenu');
+    const bLv = new Button(this, cx - 140, cy + 160, { w: 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear('menu', () => this.toSelect())).setName('clearLevels');
+    const bMe = new Button(this, cx + 140, cy + 160, { w: 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear('menu', () => this.toTitle())).setName('clearMenu');
     c.add([bLv, bMe]);
   }
 
@@ -2457,10 +2460,10 @@ export class GameScene extends Phaser.Scene {
    * "Next level" / "Levels" on the level-clear card: the only place an interstitial may show (portal builds; the
    * portal decides whether one does). Never during a level, never after a death, no pre-roll.
    */
-  private leaveClear(go: () => void): void {
+  private leaveClear(place: AdPlace, go: () => void): void {
     if (this.adBusy || this.state !== 'won') return;
     this.adBusy = true;
-    void Portal.interstitial().catch(() => undefined).then(() => {
+    void Portal.interstitial(place).catch(() => undefined).then(() => {
       this.adBusy = false;
       if (this.sys.isActive()) go();
     });
@@ -2504,9 +2507,11 @@ export class GameScene extends Phaser.Scene {
     if (this.overlay) {
       this.closeOverlay();
       this.paused = false;
+      Portal.gameplay(true);
       return;
     }
     this.paused = true;
+    Portal.gameplay(false);
     const c = this.makeOverlay();
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
     c.add(panel(this, cx, cy, 600, 500, 0xfff6d5));
@@ -2522,6 +2527,8 @@ export class GameScene extends Phaser.Scene {
       mb.setIcon(Audio.muted ? 'mute' : 'sound');
       mb.setText(Audio.muted ? t('ui.soundOff') : t('ui.soundOn'));
     });
+    // YouTube: the player's mute is YouTube's own; the game has no overall sound switch there
+    mb.setVisible(Portal.policy.ownMuteButton);
     c.add(mb);
     const lb = new Button(this, cx, cy + 192, { w: 300, h: 56, icon: 'globe', text: currentLangName(), fontSize: 22, color: '#41c6c0' }, () => {
       openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed, resume: true }); });

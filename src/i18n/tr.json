@@ -270,7 +270,7 @@
   "ui.back": "Geri",
   "ui.beatGame": "KAPIYI YENDİN!",
   "ui.chooseLevel": "BÖLÜM SEÇ",
-  "ui.controlsHelp": "Hareket için Oklar / WASD · Zıplamak için Boşluk · Duraklatmak için Esc",
+  "ui.controlsHelp": "Hareket için Oklar / WASD · Zıplamak için Boşluk · Duraklatmak için P",
   "ui.deathsLevel": "Bu bölümdeki ölüm: {n}",
   "ui.deathsNone": "Ölüm: 0 — bir kere bile mi?!",
   "ui.deathsTotal": "Toplam ölüm: {n}",

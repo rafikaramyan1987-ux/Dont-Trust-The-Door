@@ -3,11 +3,13 @@
 // portal snippet: a `y8sdk.ready` listener calls y8.sdk(), init(appConfig, adConfig) and onAuth(); emitReadyEvent()
 // covers an SDK that loaded first. The App ID / Game ID are the game's public IDs from the Y8 developer portal
 // (VITE_Y8_APP_ID / VITE_Y8_GAME_ID can override them at build time).
-// - interstitial: showAd({ type: 'next' }) on Next / Levels of the level-clear card; the SDK paces them
+// - interstitial: showAd({ type: 'next' }) on Next, { type: 'browse' } on Levels / Menu of the level-clear card (both
+//   are player clicks, never automatic); the SDK paces them (about one per 180 s); Y8 runs the pre-roll itself
 // - rewarded: showAd({ type: 'reward' }); beforeReward → showAdFn(); the reward only after adViewed
+// - pause + mute on a hidden page and on window blur (Y8 game requirements)
 // - pause + mute in beforeAd, resume in afterAd; adBreakDone / .catch / timeout settle each request exactly once
 // - pause + mute while the page is hidden; saves in localStorage
-import { BasePlatform, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, type AdPlace, type KeyValueStore, type Platform } from './types';
 
 export const Y8_SDK_URL = 'https://cdn.y8.com/minimal-sdk/2-0/y8.min.js';
 /** the game's public client IDs from the Y8 developer portal (VITE_Y8_APP_ID / VITE_Y8_GAME_ID override them) */
@@ -15,7 +17,7 @@ export const Y8_APP_ID: string = import.meta.env.VITE_Y8_APP_ID || '6aff479cc984
 export const Y8_GAME_ID: string = import.meta.env.VITE_Y8_GAME_ID || '294329';
 
 interface Y8ShowAdOptions {
-  type: 'start' | 'next' | 'reward';
+  type: 'start' | 'pause' | 'next' | 'browse' | 'reward';
   name: string;
   beforeAd?: () => void;
   afterAd?: () => void;
@@ -41,7 +43,7 @@ export class Y8Platform extends BasePlatform implements Platform {
   private sdk: Y8Sdk | null = null;
 
   async init(timeoutMs = 3500): Promise<void> {
-    this.watchVisibility();
+    this.watchVisibility(true);
     await new Promise<void>((res) => {
       const to = setTimeout(res, timeoutMs);
       window.addEventListener(
@@ -88,14 +90,14 @@ export class Y8Platform extends BasePlatform implements Platform {
     return this.sdk !== null;
   }
 
-  private show(type: 'next' | 'reward'): Promise<boolean> {
+  private show(type: 'next' | 'browse' | 'reward'): Promise<boolean> {
     const s = this.sdk;
     if (!s) return Promise.resolve(false);
     return this.runAd((done, started) => {
       let viewed = false;
       const opts: Y8ShowAdOptions = {
         type,
-        name: type === 'reward' ? 'hint' : 'level-clear',
+        name: type === 'reward' ? 'hint' : type === 'next' ? 'level-complete' : 'level-select',
         beforeAd: () => started(),
         afterAd: () => {},
         adBreakDone: () => done(type === 'reward' && viewed),
@@ -113,8 +115,8 @@ export class Y8Platform extends BasePlatform implements Platform {
     });
   }
 
-  async interstitial(): Promise<void> {
-    await this.show('next');
+  async interstitial(place: AdPlace): Promise<void> {
+    await this.show(place === 'next' ? 'next' : 'browse');
   }
   async rewarded(): Promise<boolean> {
     return this.show('reward');

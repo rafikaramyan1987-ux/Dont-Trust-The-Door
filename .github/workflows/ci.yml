@@ -63,7 +63,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: sudo apt-get install -y zip unzip ffmpeg
       - run: npm run build
-      - run: npm run submission
+      - run: npm run release
       - run: npm run test:portals
       - uses: actions/upload-artifact@v4
         if: always()
@@ -71,4 +71,4 @@ jobs:
           name: portals
           path: |
             test-results/
-            submission-*/*.zip
+            release/*/*.zip

@@ -8,6 +8,7 @@ import { Save } from '../save';
 import { Audio } from '../audio';
 import { RES } from '../art';
 import { Input } from '../input';
+import { Portal } from '../platform';
 
 /**
  * The level select: pages of 10 levels (2 rows of 5), arrows to change page, every planned level shown (locked
@@ -87,7 +88,10 @@ export class SelectScene extends Phaser.Scene {
       const b = new Button(this, x, y, { w: 150, h: 124, color: locked ? '#9aa0b8' : colors[lv.world % colors.length], radius: 26 }, () => {
         if (locked) { this.cameras.main.shake(120, 0.004); return; }
         Audio.unlock();
-        this.scene.start('Game', { level: id });
+        // GameDistribution: its pre-roll when the player starts playing (a no-op on the other builds)
+        void Portal.preroll().catch(() => undefined).then(() => {
+          if (this.sys.isActive()) this.scene.start('Game', { level: id });
+        });
       });
       b.setName(`level-${id}`);
       if (locked) {

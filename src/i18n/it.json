@@ -270,7 +270,7 @@
   "ui.back": "Indietro",
   "ui.beatGame": "HAI BATTUTO LA PORTA!",
   "ui.chooseLevel": "SCEGLI UN LIVELLO",
-  "ui.controlsHelp": "Frecce / WASD per muoverti · Spazio per saltare · Esc per la pausa",
+  "ui.controlsHelp": "Frecce / WASD per muoverti · Spazio per saltare · P per la pausa",
   "ui.deathsLevel": "Morti in questo livello: {n}",
   "ui.deathsNone": "Morti: 0 — neanche una?!",
   "ui.deathsTotal": "Morti totali: {n}",
