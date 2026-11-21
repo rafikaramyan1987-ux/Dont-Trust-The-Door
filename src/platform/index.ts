@@ -5,6 +5,8 @@ import { PlaygamaPlatform } from './playgama';
 import { GamePixPlatform } from './gamepix';
 import { Y8Platform } from './y8';
 import { CrazyGamesPlatform } from './crazygames';
+import { GameDistributionPlatform } from './gamedistribution';
+import { YouTubePlatform } from './youtube';
 
 declare const __PLATFORM__: string;
 
@@ -13,6 +15,8 @@ function make(): Platform {
   if (__PLATFORM__ === 'gamepix') return new GamePixPlatform();
   if (__PLATFORM__ === 'y8') return new Y8Platform();
   if (__PLATFORM__ === 'crazygames') return new CrazyGamesPlatform();
+  if (__PLATFORM__ === 'gamedistribution') return new GameDistributionPlatform();
+  if (__PLATFORM__ === 'youtube') return new YouTubePlatform();
   return new WebPlatform();
 }
 

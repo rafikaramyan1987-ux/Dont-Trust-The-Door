@@ -102,4 +102,68 @@ window.CrazyGames = { SDK: {
   data: { getItem: function (k) { return M.store[k] === undefined ? null : M.store[k]; }, setItem: function (k, v) { log('data.setItem', k); M.store[k] = v; } },
   user: { systemInfo: { get locale() { return M.lang; } } },
 } };`,
+
+  // GameDistribution: events go to window.GD_OPTIONS.onEvent (the game's index.html defines it before the SDK)
+  gamedistribution: `${COMMON}
+function ev(name) { log('event', name); var o = window.GD_OPTIONS; if (o && o.onEvent) o.onEvent({ name: name, message: '' }); }
+window.gdsdk = {
+  AdType: { Rewarded: 'rewarded', Interstitial: 'interstitial', Display: 'display' },
+  preloadAd: function (type) { log('preloadAd', type); return M.noRewarded ? Promise.reject(new Error('no ad')) : Promise.resolve(); },
+  showAd: function (type) {
+    log('showAd', type);
+    var mode = M.mode;
+    if (mode === 'hang') return new Promise(function () {});
+    if (mode === 'fail') return Promise.reject(new Error('no fill'));
+    ev('SDK_GAME_PAUSE'); M.adOpen = true;
+    return new Promise(function (r) { setTimeout(function () {
+      if (type === 'rewarded' && mode === 'ok') ev('SDK_REWARDED_WATCH_COMPLETE');
+      M.adOpen = false; ev('SDK_GAME_START'); r();
+    }, 400); });
+  },
+};
+setTimeout(function () { ev('SDK_READY'); }, 0);`,
+
+  // YouTube Playables (ytgame): IN_PLAYABLES_ENV, cloud save, language, pause / audio events, ads
+  youtube: `${COMMON}
+window.ytgame = {
+  IN_PLAYABLES_ENV: true,
+  SDK_VERSION: 'mock',
+  game: {
+    firstFrameReady: function () { log('firstFrameReady'); },
+    gameReady: function () { log('gameReady'); },
+    loadData: function () { log('loadData'); M.loaded = true; return Promise.resolve(M.cloud || ''); },
+    saveData: function (d) {
+      log('saveData');
+      if (!M.loaded) return Promise.reject(new Error('saveData before loadData'));
+      M.cloud = d; var o = JSON.parse(d); for (var k in o) M.store[k] = o[k];
+      return Promise.resolve();
+    },
+  },
+  system: {
+    isAudioEnabled: function () { return M.audio !== false; },
+    onAudioEnabledChange: function (cb) { on('audio', cb); return function () {}; },
+    onPause: function (cb) { on('pause', cb); return function () {}; },
+    onResume: function (cb) { on('resume', cb); return function () {}; },
+    getLanguage: function () { log('getLanguage'); return Promise.resolve(M.lang); },
+  },
+  engagement: { sendScore: function () { log('sendScore'); return Promise.resolve(); } },
+  ads: {
+    requestInterstitialAd: function () {
+      log('requestInterstitialAd');
+      var mode = M.mode;
+      if (mode === 'hang') return new Promise(function () {});
+      if (mode === 'fail') return Promise.reject(new Error('no fill'));
+      M.adOpen = true;
+      return new Promise(function (r) { setTimeout(function () { M.adOpen = false; r(); }, 400); });
+    },
+    requestRewardedAd: function (id) {
+      log('requestRewardedAd', id);
+      var mode = M.mode;
+      if (mode === 'hang') return new Promise(function () {});
+      if (mode === 'fail') return Promise.reject(new Error('no fill'));
+      M.adOpen = true;
+      return new Promise(function (r) { setTimeout(function () { M.adOpen = false; r(mode === 'ok'); }, 400); });
+    },
+  },
+};`,
 };

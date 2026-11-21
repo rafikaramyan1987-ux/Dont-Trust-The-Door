@@ -4,6 +4,7 @@
 // - pause / resume events, soundOff / soundOn, and a hidden page pause + mute the game
 // - interstitial only on Next / Levels of the level-clear card, at most one per 2 minutes (and not in the first 2)
 // - rewarded: the reward only on `success === true`
+// - updateLevel(n) when a level starts, happyMoment() when the whole game is finished
 // - language from GamePix.lang(); saves in localStorage
 import { BasePlatform, type KeyValueStore, type Platform } from './types';
 
@@ -18,6 +19,8 @@ interface GamePixSdk {
   events: { on(name: 'pause' | 'resume' | 'soundOff' | 'soundOn', fn: () => void): void };
   ads: { interstitial(): Promise<GamePixAdResult>; reward(): Promise<GamePixAdResult> };
   lang?(): string;
+  updateLevel?(level: number): unknown;
+  happyMoment?(): unknown;
   soundOff?: () => void;
   soundOn?: () => void;
   pause?: () => void;
@@ -112,7 +115,12 @@ export class GamePixPlatform extends BasePlatform implements Platform {
   gameReady(): void {
     void this.whenLoaded();
   }
-  levelStarted(): void {
+  levelStarted(level: number): void {
+    try {
+      this.s?.updateLevel?.(level);
+    } catch {
+      /* ignore */
+    }
     if (this.started || !this.s) return;
     this.started = true;
     try {
@@ -121,7 +129,14 @@ export class GamePixPlatform extends BasePlatform implements Platform {
       /* ignore */
     }
   }
-  levelCompleted(): void {}
+  levelCompleted(_level: number, last: boolean): void {
+    if (!last) return;
+    try {
+      this.s?.happyMoment?.();
+    } catch {
+      /* ignore */
+    }
+  }
   levelFailed(): void {}
   gameplay(): void {}
 

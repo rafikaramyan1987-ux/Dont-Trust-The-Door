@@ -15,7 +15,8 @@
 //     the pause menu, choice saved; font has every glyph; at 640×360 every button text and
 //     the hint box fit in every language.
 //  8. The camera never hides the hero: an arrow at the screen edge shows him (camera freeze).
-//  9. Layouts and touch (desktop, phone landscape, portrait), full jump on ▲, restart button.
+//  9. Layouts and touch (desktop, phone landscape, portrait), full jump on ▲, restart button; with portrait
+//     allowed (?portrait=1, the YouTube build) the portrait layout at 390×844 and 360×1280.
 // 10. No console errors; build < 10 MB.
 //
 // Sharding (the CI matrix): `--levels 11-15` runs the per-level parts (1, 2, 2b) for those levels only, `--general`
@@ -461,6 +462,52 @@ if (GENERAL) {
   const rot = await pp.page.evaluate(() => getComputedStyle(document.getElementById('rotate')).display);
   log(rot === 'flex', 'phone portrait 360×640 asks to rotate the phone', rot);
   await pp.ctx.close();
+
+  // portrait allowed (the YouTube build): no rotate screen; level on top, control band below, nothing overlaps
+  for (const vp of [{ width: 390, height: 844, dpr: 2 }, { width: 360, height: 1280, dpr: 1 }]) {
+    const p = await openGame(browser, url, { viewport: { width: vp.width, height: vp.height }, query: '&portrait=1', context: { hasTouch: true, isMobile: true, deviceScaleFactor: vp.dpr } });
+    const rotP = await p.page.evaluate(() => getComputedStyle(document.getElementById('rotate')).display);
+    await p.page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.lang('en'); window.__DTTD.start(1); });
+    await p.page.waitForTimeout(700);
+    const lay = await p.page.evaluate(() => {
+      const g = window.__DTTD.game.scene.getScene('Game');
+      const cam = g.uiCam; const wv = g.cameras.main; const dpr = g.scale.width / window.innerWidth;
+      const w0 = cam.getWorldPoint(0, 0);
+      const box = (x0, y0, x1, y1) => ({ x: ((x0 - w0.x) * cam.zoom) / dpr, y: ((y0 - w0.y) * cam.zoom) / dpr, w: ((x1 - x0) * cam.zoom) / dpr, h: ((y1 - y0) * cam.zoom) / dpr });
+      const bnd = (o) => { const b = o.getBounds(); return box(b.x, b.y, b.right, b.bottom); };
+      const pad = g.touchBtns.map((b) => { const c = b.img; const sz = c.getData('size'); return { key: b.key, ...box(c.x - sz.w / 2, c.y - sz.h / 2, c.x + sz.w / 2, c.y + sz.h / 2) }; });
+      return {
+        level: { x: wv.x / dpr, y: wv.y / dpr, w: wv.width / dpr, h: wv.height / dpr }, rows: wv.height / wv.zoom / 40,
+        pad, sys: g.sysButtons.map((b) => ({ key: 'sys', ...bnd(b) })), name: { key: 'name', ...bnd(g.levelText) }, W: window.innerWidth, H: window.innerHeight,
+      };
+    });
+    await p.page.screenshot({ path: join(shotDir, `layout-portrait-${vp.width}x${vp.height}.png`) });
+    const all = [...lay.pad, ...lay.sys, lay.name];
+    const inside = [lay.level, ...all].every((r) => r.x >= -0.5 && r.y >= -0.5 && r.x + r.w <= lay.W + 0.5 && r.y + r.h <= lay.H + 0.5);
+    const hit = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
+    const overlap = all.some((a, i) => hit(a, lay.level) || all.some((b, j) => j > i && hit(a, b)));
+    const big = lay.pad.every((b) => b.w >= 44 && b.h >= 44) && lay.sys.every((b) => b.w >= 44 && b.h >= 44);
+    const cdp = await p.ctx.newCDPSession(p.page);
+    const st = () => p.page.evaluate(() => window.__DTTD.state());
+    const waitTicks = async (n) => { const t0 = (await st()).levelTick; for (let i = 0; i < 2000; i++) { const s = await st(); if (s.levelTick >= t0 + n) return s; await p.page.waitForTimeout(10); } return st(); };
+    const right = lay.pad.find((b) => b.key === 'right'), jump = lay.pad.find((b) => b.key === 'jump');
+    await p.page.evaluate(() => window.__DTTD.start(1));
+    const s0 = await waitTicks(10);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: right.x + right.w / 2, y: right.y + right.h / 2, id: 1 }] });
+    const s1 = await waitTicks(30);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await p.page.evaluate(() => window.__DTTD.start(1));
+    const j0 = await waitTicks(20);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: jump.x + jump.w / 2, y: jump.y + jump.h / 2, id: 2 }] });
+    let minY = j0.y;
+    for (let i = 0; i < 4; i++) minY = Math.min(minY, (await waitTicks(6)).y);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    log(rotP === 'none' && inside && !overlap && big && Math.abs(lay.rows - 18) < 0.05 && s1.x > s0.x + 20 && j0.y - minY > 60,
+      `portrait allowed (?portrait=1) ${vp.width}×${vp.height}: no rotate screen, the level and all touch buttons inside the screen and not overlapping, holding ▶ moves the hero, ▲ jumps`,
+      `rotate ${rotP}, ${lay.rows.toFixed(1)} rows × ${(lay.level.w / (lay.level.h / 18)).toFixed(1)} tiles, inside ${inside}, overlap ${overlap}, ≥44 px ${big}, ▶ x ${s0.x.toFixed(0)} → ${s1.x.toFixed(0)}, ▲ ${(j0.y - minY).toFixed(0)} px`);
+    allErrors.push(...p.errors);
+    await p.ctx.close();
+  }
 }
 
 // 10. errors and size

@@ -270,7 +270,7 @@
   "ui.back": "Назад",
   "ui.beatGame": "ТЫ ПОБЕДИЛ ДВЕРЬ!",
   "ui.chooseLevel": "ВЫБЕРИ УРОВЕНЬ",
-  "ui.controlsHelp": "Стрелки / WASD – ходьба · Пробел – прыжок · Esc – пауза",
+  "ui.controlsHelp": "Стрелки / WASD – ходьба · Пробел – прыжок · P – пауза",
   "ui.deathsLevel": "Смертей на уровне: {n}",
   "ui.deathsNone": "Смертей: 0 — ни разу?!",
   "ui.deathsTotal": "Всего смертей: {n}",

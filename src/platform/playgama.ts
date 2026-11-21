@@ -10,7 +10,7 @@
 //   isInterstitialSupported; no timer of the game's own (Bridge paces them)
 // - rewarded: showRewarded(); the reward only after the `rewarded` state, settled on closed / failed
 // - pause + mute on ads, on PAUSE_STATE_CHANGED and while the page is hidden; AUDIO_STATE_CHANGED mutes
-import { BasePlatform, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, DEFAULT_POLICY, type KeyValueStore, type Platform } from './types';
 
 export const SAVE_KEY = 'dttd-save-v1';
 
@@ -42,6 +42,8 @@ type AdKind = 'interstitial' | 'rewarded';
 
 export class PlaygamaPlatform extends BasePlatform implements Platform {
   readonly name = 'playgama' as const;
+  // Esc must not be used; the language only from bridge.platform.language, never the browser (English fallback)
+  readonly policy = { ...DEFAULT_POLICY, esc: 'none' as const, browserLanguage: false };
   private b: Bridge | null = null;
   private store: Map<string, string> | null = null;
   private ready = false;

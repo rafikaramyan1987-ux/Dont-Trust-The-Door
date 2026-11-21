@@ -270,7 +270,7 @@
   "ui.back": "Voltar",
   "ui.beatGame": "VOCÊ VENCEU A PORTA!",
   "ui.chooseLevel": "ESCOLHA UMA FASE",
-  "ui.controlsHelp": "Setas / WASD para mover · Espaço para pular · Esc para pausar",
+  "ui.controlsHelp": "Setas / WASD para mover · Espaço para pular · P para pausar",
   "ui.deathsLevel": "Mortes nesta fase: {n}",
   "ui.deathsNone": "Mortes: 0 — nem uma vezinha?!",
   "ui.deathsTotal": "Total de mortes: {n}",

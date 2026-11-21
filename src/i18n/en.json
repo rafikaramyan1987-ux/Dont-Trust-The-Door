@@ -415,7 +415,7 @@
   "ui.back": "Back",
   "ui.beatGame": "YOU BEAT THE DOOR!",
   "ui.chooseLevel": "CHOOSE A LEVEL",
-  "ui.controlsHelp": "Arrows / WASD to move · Space to jump · Esc to pause",
+  "ui.controlsHelp": "Arrows / WASD to move · Space to jump · P to pause",
   "ui.deathsLevel": "Deaths this level: {n}",
   "ui.deathsNone": "Deaths: 0 — not even once?!",
   "ui.deathsTotal": "Total deaths: {n}",
