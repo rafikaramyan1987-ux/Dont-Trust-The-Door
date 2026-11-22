@@ -634,9 +634,13 @@ else `localStorage` – the same key and format as the web version. YouTube neve
 - Interstitial when the player presses **Next level** (and, where the portal allows it, **Levels / Menu**) on the
   level-clear card – never during a level, never after a death. GameDistribution also plays its pre-roll when the
   player presses Play. No timer of our own: how often one shows is the SDK's call (GamePix: at most one per 2 minutes).
-- Rewarded hint: the bulb asks "Watch an ad for the hint" (8 languages); the hint is given only when the SDK
-  confirms the reward, otherwise "No ad available right now, try again later" and the hint stays available. Where
-  rewarded ads are not supported (and on the web) the hint is free. Still one hint per level, no other rewards.
+- Rewarded hint: only when an ad can really be shown does the bulb ask "Watch an ad for the hint" (8 languages). The
+  hint is given when the ad is watched, and also whenever no ad could be shown (no fill, ads disabled such as
+  CrazyGames' Basic Launch, an ad blocker, an SDK error or a timeout). Only a player who closes a real ad before its end
+  gets no hint (and can try again). Where no rewarded ad can be offered (the web build, a missing SDK, ads known to be
+  unavailable) the bulb gives the hint at once, without the dialog. Still one hint per level, no other rewards.
+- Sound: Safari's "interrupted" / "suspended" audio is resumed on every tap, click or key, on window focus, when the
+  page becomes visible and after every ad; a closed or stuck AudioContext is replaced on the next gesture.
 - The game pauses and mutes during every ad and comes back with the player's own sound setting. Every ad request
   settles exactly once: finished, closed, failed, or a timeout.
 

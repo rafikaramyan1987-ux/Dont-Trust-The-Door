@@ -10,7 +10,7 @@
     "preview": "vite preview --port 4173",
     "test:levels": "node tests/validate-levels.mjs",
     "test:bot": "node tests/run-selftest.mjs",
-    "test": "npm run test:levels && npm run test:i18n && npm run build && npm run test:hints && npm run test:bot && npm run test:respawn && npm run release && npm run test:portals && npm run test:release",
+    "test": "npm run test:levels && npm run test:i18n && npm run build && npm run test:hints && npm run test:audio && npm run test:bot && npm run test:respawn && npm run release && npm run test:portals && npm run test:release",
     "record": "npm run levels && vite build && node tests/author-replays.mjs",
     "media": "node tools/capture-media.mjs --screens-only",
     "audio": "node tools/render-audio.mjs",
@@ -28,7 +28,8 @@
     "test:portals": "node tests/portals.mjs",
     "test:release": "node tests/release.mjs",
     "test:respawn": "node tests/respawn.mjs",
-    "test:hints": "node tests/hint-fit.mjs"
+    "test:hints": "node tests/hint-fit.mjs",
+    "test:audio": "node tests/audio.mjs"
   },
   "dependencies": {
     "@fontsource/nunito": "5.3.0",

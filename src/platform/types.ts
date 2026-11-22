@@ -55,19 +55,29 @@ export interface Platform {
   levelFailed(level: number): void;
   /** a level is being played (true) or not (false) */
   gameplay(on: boolean): void;
-  /** rewarded ads exist on this portal right now (false: the hint stays free) */
+  /** a rewarded ad can be offered right now (false: the bulb gives the hint at once, with no ad and no dialog) */
   readonly rewardedSupported: boolean;
   /** an interstitial at a break (Next / Levels on the level-clear card); settles exactly once */
   interstitial(place: AdPlace): Promise<void>;
   /** the portal's pre-roll when the player presses Play (GameDistribution, once per session): a promise that settles
    * exactly once, or null when there is none (the game starts at once) */
   preroll(): Promise<void> | null;
-  /** a rewarded ad; true only when the SDK confirmed the reward; settles exactly once */
-  rewarded(): Promise<boolean>;
+  /**
+   * a rewarded ad, settles exactly once: 'rewarded' (watched to the end), 'dismissed' (the player closed a real ad
+   * before the end: the only case without the hint) or 'unavailable' (not supported, no fill, ads disabled, an error
+   * or a timeout: the game gives the hint anyway)
+   */
+  rewarded(): Promise<RewardResult>;
   /** the game listens: paused (ad, portal pause, hidden page) and muted (the same, or the portal's sound switch) */
   onPause: (paused: boolean) => void;
   onMute: (muted: boolean) => void;
 }
+
+export type RewardResult = 'rewarded' | 'dismissed' | 'unavailable';
+/** how one ad request ended: watched, closed early after it started, never shown / failed, or given up after starting */
+export type AdOutcome = 'completed' | 'dismissed' | 'failed' | 'timeout';
+/** a rewarded request's outcome → what the game does: only a real ad closed early withholds the hint */
+export const rewardResult = (o: AdOutcome): RewardResult => (o === 'completed' ? 'rewarded' : o === 'dismissed' ? 'dismissed' : 'unavailable');
 
 /** an ad that has not started after this long counts as failed (ms) */
 export const AD_TIMEOUT = 8000;
@@ -131,36 +141,39 @@ export abstract class BasePlatform {
   }
 
   /**
-   * Run one ad request that settles exactly once: `start(done)` calls the SDK and must call `done(ok)` when the ad
-   * is finished / closed / failed; `started()` marks that it is playing. Not started within AD_TIMEOUT = failed;
-   * anything still open after AD_MAX = given up. The game is paused + muted from start to settle.
+   * Run one ad request that settles exactly once: `start(done)` calls the SDK and must call `done(outcome)` when
+   * the ad is watched ('completed'), closed early by the player ('dismissed') or failed / not shown ('failed');
+   * `started()` marks that a real ad is playing. A 'dismissed' without a start counts as 'failed'. Not started
+   * within AD_TIMEOUT = 'failed'; still open after `maxMs` = 'timeout'. The game is paused + muted from start to settle.
    */
   private busy = false;
-  protected runAd(start: (done: (ok: boolean) => void, started: () => void) => void, maxMs = AD_MAX): Promise<boolean> {
-    if (this.busy) return Promise.resolve(false);
+  protected runAd(start: (done: (o: AdOutcome) => void, started: () => void) => void, maxMs = AD_MAX): Promise<AdOutcome> {
+    if (this.busy) return Promise.resolve('failed');
     this.busy = true;
     return new Promise((res) => {
       let settled = false;
-      const done = (ok: boolean) => {
+      let began = false;
+      const done = (o: AdOutcome) => {
         if (settled) return;
         settled = true;
         clearTimeout(t1);
         clearTimeout(t2);
         this.busy = false;
         this.setPaused('ad', false);
-        res(ok);
+        res(o === 'dismissed' && !began ? 'failed' : o);
       };
       const started = () => {
         if (settled) return;
+        began = true;
         clearTimeout(t1);
         this.setPaused('ad', true);
       };
-      const t1 = setTimeout(() => done(false), AD_TIMEOUT);
-      const t2 = setTimeout(() => done(false), maxMs);
+      const t1 = setTimeout(() => done('failed'), AD_TIMEOUT);
+      const t2 = setTimeout(() => done('timeout'), maxMs);
       try {
         start(done, started);
       } catch {
-        done(false);
+        done('failed');
       }
     });
   }

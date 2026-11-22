@@ -8,9 +8,10 @@
 //   game_ready (an earlier one is held and sent right after it)
 // - interstitial: advertisement.showInterstitial() on Next / Levels of the level-clear card, only where
 //   isInterstitialSupported; no timer of the game's own (Bridge paces them)
-// - rewarded: showRewarded(); the reward only after the `rewarded` state, settled on closed / failed
+// - rewarded: showRewarded(); the hint after the `rewarded` state; `closed` after `opened` without it (the player
+//   closed the ad) gives no hint; `failed` / not supported / no state at all gives the hint for free
 // - pause + mute on ads, on PAUSE_STATE_CHANGED and while the page is hidden; AUDIO_STATE_CHANGED mutes
-import { BasePlatform, DEFAULT_POLICY, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, DEFAULT_POLICY, rewardResult, type AdOutcome, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export const SAVE_KEY = 'dttd-save-v1';
 
@@ -48,7 +49,7 @@ export class PlaygamaPlatform extends BasePlatform implements Platform {
   private store: Map<string, string> | null = null;
   private ready = false;
   private held: string[] = [];
-  private pending: { kind: AdKind; started: () => void; done: (ok: boolean) => void; earned: boolean } | null = null;
+  private pending: { kind: AdKind; started: () => void; done: (o: AdOutcome) => void; earned: boolean } | null = null;
   readonly log: string[] = [];
 
   async init(): Promise<void> {
@@ -145,23 +146,23 @@ export class PlaygamaPlatform extends BasePlatform implements Platform {
   private onAdState(kind: AdKind, state: string): void {
     const p = this.pending;
     if (!p || p.kind !== kind) return;
-    if (state === 'loading' || state === 'opened') p.started();
+    if (state === 'opened') p.started(); // a real ad on screen ('loading' is not one yet)
     else if (state === 'rewarded') p.earned = true;
-    else if (state === 'closed') p.done(kind === 'rewarded' ? p.earned : true);
-    else if (state === 'failed') p.done(false);
+    else if (state === 'closed') p.done(kind === 'rewarded' && !p.earned ? 'dismissed' : 'completed');
+    else if (state === 'failed') p.done('failed');
   }
 
-  private show(kind: AdKind): Promise<boolean> {
+  private show(kind: AdKind): Promise<AdOutcome> {
     const s = this.b;
-    if (!s) return Promise.resolve(false);
+    if (!s) return Promise.resolve('failed');
     return this.runAd((done, started) => {
       const p = {
         kind,
         earned: false,
         started,
-        done: (ok: boolean) => {
+        done: (o: AdOutcome) => {
           if (this.pending === p) this.pending = null;
-          done(ok);
+          done(o);
         },
       };
       this.pending = p;
@@ -177,8 +178,8 @@ export class PlaygamaPlatform extends BasePlatform implements Platform {
     await this.show('interstitial');
   }
 
-  async rewarded(): Promise<boolean> {
-    if (!this.rewardedSupported) return false;
-    return this.show('rewarded');
+  async rewarded(): Promise<RewardResult> {
+    if (!this.rewardedSupported) return 'unavailable';
+    return rewardResult(await this.show('rewarded'));
   }
 }

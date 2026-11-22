@@ -12,6 +12,8 @@ export { LOOP_SECONDS, LOOP_STEPS, MUSIC_EIGHTH };
 
 const MASTER = 0.8;
 const MUSIC = 0.55;
+/** failed resume() attempts before the next gesture builds a fresh AudioContext */
+const RESUME_TRIES = 3;
 
 type AC = typeof AudioContext;
 type OAC = typeof OfflineAudioContext;
@@ -43,6 +45,15 @@ class AudioEngine {
   private posAt: number | null = null;
   /** Test hook: every sfx call is reported here (used for the trailer soundtrack). */
   onSfx: ((name: SfxName) => void) | null = null;
+  /** failed resume() attempts in a row: after RESUME_TRIES (or a closed context) the next gesture makes a new one */
+  private resumeFails = 0;
+  private listening = false;
+  private lastState: string | null = null;
+
+  constructor() {
+    // the first pointerdown / touchstart / keydown anywhere unlocks the sound (a user gesture); nothing plays before
+    if (typeof window !== 'undefined') this.listen();
+  }
 
   /** Fetch and decode every file (once; called after boot and again, harmlessly, on unlock). */
   preload(): Promise<void> {
@@ -73,24 +84,34 @@ class AudioEngine {
     return this.decoder;
   }
 
-  /** Must be called from a user gesture at least once (mobile autoplay rules). */
+  /**
+   * Must be called from a user gesture at least once (mobile autoplay rules). Creates the AudioContext on the first
+   * gesture, and a fresh one when the old one is closed or will not resume (the decoded buffers are reused); resumes
+   * a context that is not running. Also installs the gesture / focus listeners that keep the sound alive.
+   */
   unlock(): void {
+    this.listen();
     try {
+      if (this.ctx && (this.ctx.state === 'closed' || this.resumeFails >= RESUME_TRIES)) this.dropContext();
       if (!this.ctx) {
         const C: AC | undefined = window.AudioContext || (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
         if (!C) return;
-        this.ctx = new C();
-        this.master = this.ctx.createGain();
+        const ctx = new C();
+        this.ctx = ctx;
+        this.master = ctx.createGain();
         this.master.gain.value = this.muted || this.sysMuted ? 0 : MASTER;
-        this.master.connect(this.ctx.destination);
-        this.sfxBus = this.ctx.createGain();
+        this.master.connect(ctx.destination);
+        this.sfxBus = ctx.createGain();
         this.sfxBus.connect(this.master);
-        this.musicBus = this.ctx.createGain();
+        this.musicBus = ctx.createGain();
         this.musicBus.gain.value = MUSIC;
         this.musicBus.connect(this.master);
-        if (this.musicOn) this.posAt = this.ctx.currentTime;
+        // the loop clock continues where it was (posBase) on the new context's clock
+        if (this.musicOn) this.posAt = ctx.currentTime;
+        this.lastState = ctx.state;
+        ctx.onstatechange = () => this.onState(ctx);
       }
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      this.resume();
       void this.preload();
       this.syncMusic();
     } catch {
@@ -98,8 +119,89 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Resume a context that is not running and not closed: "suspended", and Safari's own "interrupted" (another app
+   * or tab took the audio). Without a gesture this may fail; the next gesture tries again.
+   */
+  resume(): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+    try {
+      void Promise.resolve(ctx.resume()).then(
+        () => {
+          if (this.ctx === ctx && ctx.state === 'running') this.resumeFails = 0;
+        },
+        () => {
+          if (this.ctx === ctx) this.resumeFails++;
+        },
+      );
+    } catch {
+      this.resumeFails++;
+    }
+  }
+
+  /** the context changed state: back to "running" restarts the music loop once, at the loop position */
+  private onState(ctx: AudioContext): void {
+    if (ctx !== this.ctx) return;
+    const was = this.lastState;
+    this.lastState = ctx.state;
+    if (ctx.state === 'running' && was !== 'running') {
+      this.resumeFails = 0;
+      this.restartMusic();
+    }
+  }
+
+  /** the music source is replaced by a new one at the current loop position (after the context came back) */
+  private restartMusic(): void {
+    const old = this.music;
+    if (!old) return this.syncMusic();
+    this.music = null;
+    try {
+      old.stop();
+    } catch {
+      /* already stopped */
+    }
+    try {
+      old.disconnect();
+    } catch {
+      /* ignore */
+    }
+    this.syncMusic();
+  }
+
+  /** forget a closed / broken context (its nodes); the next unlock() builds a new one */
+  private dropContext(): void {
+    const ctx = this.ctx;
+    if (ctx) {
+      this.posBase = this.loopPos();
+      ctx.onstatechange = null;
+      if (ctx.state !== 'closed') void Promise.resolve(ctx.close()).catch(() => {});
+    }
+    this.ctx = null;
+    this.master = this.sfxBus = this.musicBus = null;
+    this.music = null;
+    this.resumeFails = 0;
+    this.lastState = null;
+  }
+
+  /**
+   * Once: every pointerdown / touchstart / keydown (capture phase, passive) resumes or rebuilds the audio (it is a
+   * user gesture); window focus and the page becoming visible resume it. Before the first gesture nothing plays.
+   */
+  private listen(): void {
+    if (this.listening || typeof window === 'undefined') return;
+    this.listening = true;
+    const gesture = () => this.unlock();
+    for (const ev of ['pointerdown', 'touchstart', 'keydown']) window.addEventListener(ev, gesture, { capture: true, passive: true });
+    window.addEventListener('focus', () => this.resume());
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.resume();
+    });
+  }
+
   sfx(name: SfxName): void {
     if (this.onSfx) this.onSfx(name);
+    if (this.ctx && this.ctx.state !== 'running') this.resume();
     if (!this.ctx || !this.sfxBus || this.muted || this.sysMuted || this.ctx.state !== 'running') return;
     const buf = this.buffers.get(name);
     if (!buf) return; // not decoded yet

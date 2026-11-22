@@ -35,7 +35,7 @@ title, short description (≤ 160 characters), long description, controls (keybo
   used); sound follows `isAudioEnabled()` / `onAudioEnabledChange()` and the game has no overall sound button of its own.
 - Saves only through `loadData()` (awaited at boot) / `saveData()`; the language from `getLanguage()` and never kept in
   the save; `requestInterstitialAd()` at the level-clear card, `requestRewardedAd('hint-for-current-level')` for the
-  hint (granted only when it returns true); Escape only closes the pause menu.
+  hint (true: hint; false, the ad closed early: no hint; a rejected request or a timeout: hint for free); Escape only closes the pause menu.
 - Every aspect ratio from 9:32 to 32:9 works: portrait phones get the level on top and the touch buttons below.
 - No request outside the zip except the SDK; file names `[a-zA-Z0-9-._]`; well under the 30 MiB initial bundle.
 - Checked by `scripts/youtube/check.mjs`.

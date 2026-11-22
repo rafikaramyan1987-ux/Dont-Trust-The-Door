@@ -9,9 +9,10 @@
 //   language is never stored in the save
 // - language only from ytgame.system.getLanguage() (never navigator.language); English otherwise
 // - ads: ytgame.ads.requestInterstitialAd() at the level transition / menu break (never rewarded on it),
-//   requestRewardedAd('hint') → true only when the reward was earned; YouTube paces and fills them
+//   requestRewardedAd() → the hint when the reward was earned, none when the ad was closed early, the hint for free
+//   when no ad could be shown (rejected request, timeout); YouTube paces and fills them
 // - Escape only closes the pause menu and is never blocked
-import { BasePlatform, DEFAULT_POLICY, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, DEFAULT_POLICY, rewardResult, type AdOutcome, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export const YT_SDK_URL = 'https://www.youtube.com/game_api/v1';
 export const REWARD_ID = 'hint-for-current-level';
@@ -145,23 +146,25 @@ export class YouTubePlatform extends BasePlatform implements Platform {
     return !!this.y?.ads;
   }
 
-  private ad(run: (a: NonNullable<YtGame['ads']>) => Promise<boolean>): Promise<boolean> {
+  private ad(run: (a: NonNullable<YtGame['ads']>) => Promise<AdOutcome>): Promise<AdOutcome> {
     const a = this.y?.ads;
-    if (!a) return Promise.resolve(false);
+    if (!a) return Promise.resolve('failed');
     return this.runAd((done, started) => {
-      // the request is the ad: the game stays paused + muted until it settles
+      // the request is the ad: the game stays paused + muted until it settles; a rejected request = no ad ('failed')
       started();
       run(a).then(
-        (ok) => done(ok),
-        () => done(false),
+        (o) => done(o),
+        () => done('failed'),
       );
     }, YT_AD_MAX);
   }
 
   async interstitial(): Promise<void> {
-    await this.ad((a) => a.requestInterstitialAd().then(() => true));
+    await this.ad((a) => a.requestInterstitialAd().then((): AdOutcome => 'completed'));
   }
-  async rewarded(): Promise<boolean> {
-    return this.ad((a) => a.requestRewardedAd(REWARD_ID).then((earned) => earned === true));
+  /** true: the reward was earned (hint); false: the ad played but was not watched to the end (no hint); a rejected
+   * request (no ad) or a timeout: the hint for free */
+  async rewarded(): Promise<RewardResult> {
+    return rewardResult(await this.ad((a) => a.requestRewardedAd(REWARD_ID).then((earned): AdOutcome => (earned === true ? 'completed' : 'dismissed'))));
   }
 }

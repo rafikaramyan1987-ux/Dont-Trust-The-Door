@@ -3,10 +3,11 @@
 // - lifecycle: loading(0..100) during boot, `await loaded()` before the title shows, gameStart() at the first level
 // - pause / resume events, soundOff / soundOn, and a hidden page pause + mute the game
 // - interstitial only on Next / Levels of the level-clear card, at most one per 2 minutes (and not in the first 2)
-// - rewarded: the reward only on `success === true`
+// - rewarded: the hint on `success === true`; `success: false` after the SDK's pause (a real ad closed early) gives
+//   no hint; no ad at all (no fill, error, not loaded, timeout: no pause first) gives the hint for free
 // - updateLevel(n) when a level starts, happyMoment() when the whole game is finished
 // - language from GamePix.lang(); saves in localStorage
-import { BasePlatform, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, rewardResult, type AdOutcome, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export const GPX_SDK_URL = 'https://integration.gamepix.com/sdk/v3/gamepix.sdk.js';
 export const MIDGAME_GAP = 120_000;
@@ -144,16 +145,17 @@ export class GamePixPlatform extends BasePlatform implements Platform {
     return !!this.s;
   }
 
-  private ad(kind: 'interstitial' | 'reward'): Promise<boolean> {
+  private ad(kind: 'interstitial' | 'reward'): Promise<AdOutcome> {
     const s = this.s;
-    if (!s) return Promise.resolve(false);
+    if (!s) return Promise.resolve('failed');
     return this.runAd((done, started) => {
       // the SDK pauses the game when the ad starts (or the promise settles first); not started in AD_TIMEOUT = failed
       this.adStarted = started;
       const r = kind === 'reward' ? s.ads.reward() : s.ads.interstitial();
       Promise.resolve(r).then(
-        (v) => done(!!v && v.success === true),
-        () => done(false),
+        // a failure without the pause first (no fill, error) counts as 'failed' (runAd: 'dismissed' needs a start)
+        (v) => done(v && v.success === true ? 'completed' : 'dismissed'),
+        () => done('failed'),
       );
     }).finally(() => (this.adStarted = null));
   }
@@ -164,9 +166,9 @@ export class GamePixPlatform extends BasePlatform implements Platform {
     await this.ad('interstitial');
   }
 
-  async rewarded(): Promise<boolean> {
-    const ok = await this.ad('reward');
-    if (ok) this.lastAd = Date.now();
-    return ok;
+  async rewarded(): Promise<RewardResult> {
+    const o = await this.ad('reward');
+    if (o === 'completed') this.lastAd = Date.now();
+    return rewardResult(o);
   }
 }

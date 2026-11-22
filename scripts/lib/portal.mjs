@@ -26,6 +26,20 @@ export const zipPath = (portal) => resolve(`release/${portal}/${SLUG}-${portal}.
 export const storeDir = (portal) => resolve(`release/store/${portal}`);
 export const distDir = (portal) => resolve(`dist-${portal}`);
 
+/** release/<portal>/<slug>-<portal>-media.zip: the portal's listing images / videos plus the shared icon, screenshots
+ * and listing texts (from release/store/), ready to attach to the portal's form */
+export const mediaZipPath = (portal) => resolve(`release/${portal}/${SLUG}-${portal}-media.zip`);
+export function makeMediaZip(portal) {
+  const store = resolve('release/store');
+  const parts = [portal, 'icon', 'screenshots', 'text'].filter((d) => existsSync(join(store, d)));
+  if (!parts.includes(portal)) throw new Error(`release/store/${portal}/ missing: run \`npm run store\` first`);
+  const out = mediaZipPath(portal);
+  rmSync(out, { force: true });
+  execFileSync('zip', ['-r', '-9', '-X', '-D', '-q', out, ...parts, '-x', '.DS_Store'], { cwd: store, stdio: 'inherit' });
+  console.log(`${out} (${(statSync(out).size / 1024).toFixed(0)} KB)`);
+  return out;
+}
+
 /** zip dist-<portal>/ with index.html at the root (no directory entries, no extra attributes) */
 export function makeZip(portal) {
   const dist = distDir(portal);

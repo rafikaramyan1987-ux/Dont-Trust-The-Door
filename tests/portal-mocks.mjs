@@ -4,6 +4,7 @@
 //   'noreward' a rewarded ad is closed early (no reward)
 //   'fail'    the ad fails at once (no fill)
 //   'hang'    the SDK never answers (the game's own timeout must settle the request)
+//   'disabled' (CrazyGames) the request is refused at once with adsDisabled (Basic Launch), before any ad starts
 // window.__mock.fire(name, ...args) fires a portal event (pause / resume / sound) where the portal has one.
 const COMMON = `
 window.__mock = window.__mock || { calls: [], mode: 'ok', lang: 'de', store: {}, listeners: {}, adOpen: false };
@@ -96,6 +97,7 @@ window.CrazyGames = { SDK: {
     var mode = M.mode;
     if (mode === 'hang') return;
     if (mode === 'fail') { setTimeout(function () { cb.adError && cb.adError({ code: 'unfilled' }); }, 50); return; }
+    if (mode === 'disabled') { setTimeout(function () { cb.adError && cb.adError({ code: 'adsDisabled', message: 'Ads are not allowed in basic launch flow' }); }, 10); return; }
     cb.adStarted && cb.adStarted(); M.adOpen = true;
     setTimeout(function () { M.adOpen = false; if (type === 'rewarded' && mode === 'noreward') cb.adError && cb.adError({ code: 'closed' }); else cb.adFinished && cb.adFinished(); }, 400);
   } },
