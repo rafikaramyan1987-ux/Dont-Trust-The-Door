@@ -11,6 +11,9 @@ import { Door } from '../game/Door';
 import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
+import { Portal, PortalState } from '../platform';
+import { EXTS } from '../game/ext';
+import type { MoveCtx } from '../game/ext/types';
 import { applyLayout, Layout } from '../layout';
 import { Button, label, panel, bubble, fitText } from '../ui';
 
@@ -19,6 +22,10 @@ const SPIKE_DIR: Record<string, Dir> = { '^': 'up', v: 'down', '<': 'left', '>':
 const SPIKE_ROT: Record<Dir, number> = { up: 0, down: Math.PI, left: -Math.PI / 2, right: Math.PI / 2 };
 /** Input-lag trap: keys arrive this many ticks late. */
 const LAG_TICKS = 18;
+/** swimming: gravity in water, the slowest sink, the stroke speed, how long you can stay under (ticks) */
+const WATER = { gravity: 0.22, maxFall: 150, stroke: 330, strokeGap: 10, run: 0.65, air: 240 };
+/** how fast the hero pushes a crate (px/tick) */
+const CRATE_PUSH = 2.2;
 /** Hiccup trap: an involuntary hop every N ticks while on the ground. */
 const HICCUP_TICKS = 60;
 /** Hiccup hop strength (fraction of a full jump; it cannot be cut short). */
@@ -54,6 +61,20 @@ interface MoveState {
 interface GroupRT {
   id: string;
   def: GroupDef;
+  /** conveyor speed now (px/s; a `belt` action changes it) */
+  belt: number;
+  arrows: Phaser.GameObjects.Image[];
+  /** button caps (pressed while the hero touches the group) */
+  plates: Phaser.GameObjects.Image[];
+  pressed: boolean;
+  /** crates: speed (px/tick) and the push the hero gives it this tick */
+  cvx: number;
+  cvy: number;
+  push: number;
+  /** a magnet pulls this crate up */
+  magnet: boolean;
+  /** electrified water: the sparks overlay */
+  zapFx: Phaser.GameObjects.Graphics | null;
   tiles: { tx: number; ty: number }[];
   container: Phaser.GameObjects.Container;
   bodies: Phaser.GameObjects.Zone[];
@@ -75,6 +96,9 @@ interface GroupRT {
   toss: { vx: number; vy: number } | null;
   eatX: number | null;
   eatSpeed: number;
+  /** `grow`: the group appears column by column from the left; tiles left of growX exist */
+  growX: number | null;
+  growSpeed: number;
   active: boolean;
   frogVy: number;
   frogAir: boolean;
@@ -90,7 +114,7 @@ interface GroupRT {
 
 interface Shot { x: number; y: number; vx: number; left: number; img: Phaser.GameObjects.Image }
 
-interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean }
+interface TriggerRT { def: TriggerDef; fired: boolean; inside?: boolean; undoAt?: number }
 
 export interface Snapshot {
   level: number;
@@ -115,6 +139,12 @@ export interface Snapshot {
   hudDeaths: string;
   ctrlMode: string;
   gScale: number;
+  /** fields the level extensions add */
+  ext: Record<string, unknown>;
+  /** swimming: air left (ticks), in water, head under water */
+  air: number;
+  wet: boolean;
+  headUnder: boolean;
   camFrozen: boolean;
   camFlip: boolean;
   camZoom: number;
@@ -147,6 +177,10 @@ export class GameScene extends Phaser.Scene {
   private slowmo = 0;
   state: 'play' | 'dead' | 'won' = 'play';
   paused = false;
+  /** restarted only to apply a new language (the same run goes on: no new level_started) */
+  private resumed = false;
+  /** an ad is being shown from the level-clear card or the hint card: buttons do nothing meanwhile */
+  private adBusy = false;
   private stateT = 0;
   private gdir = 1;
   private grounded = false;
@@ -189,6 +223,19 @@ export class GameScene extends Phaser.Scene {
   private fired = new Set<string>();
   private hints: { obj: Phaser.GameObjects.Text; after: number }[] = [];
   private staticSolid = new Set<number>();
+  /** per-run state of the level extensions (src/game/ext) */
+  ext: Record<string, any> = {};
+  /** the direction the hero is trying to move this tick (-1, 0, 1): crates are pushed by it */
+  private inputDir = 0;
+  /** swimming: in water this tick, the current there (px/s), air left (ticks), stroke cooldown */
+  private inWater = false;
+  private headUnder = false;
+  private current: [number, number] = [0, 0];
+  private air = WATER.air;
+  private strokeT = 0;
+  private lastWet = -99;
+  /** the air left, as bubbles over the hero's head (only while some is used up) */
+  private airGfx: Phaser.GameObjects.Graphics | null = null;
   private fakeWalls: GroupRT[] = [];
   /** Level width in tiles / pixels (levels scroll horizontally). */
   cols = 32;
@@ -275,7 +322,9 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean | number; hintUsed?: boolean }): void {
+  init(data: { level?: number; replay?: Keys[]; checkpoint?: boolean | number; hintUsed?: boolean; resume?: boolean }): void {
+    this.resumed = !!data.resume;
+    this.adBusy = false;
     this.levelNum = Phaser.Math.Clamp(data.level ?? 1, 1, LEVELS.length);
     this.cpIdx = data.checkpoint === true ? 0 : typeof data.checkpoint === 'number' ? data.checkpoint : -1;
     this.hintUsed = !!data.hintUsed;
@@ -361,12 +410,15 @@ export class GameScene extends Phaser.Scene {
       if (c === 'pause') this.togglePause();
       else if (c === 'restart' && !this.overlay) this.restartLevel();
       else if (c === 'mute') this.toggleMute();
-      else if (c === 'confirm' && this.overlay && this.state === 'won') this.nextLevel();
+      else if (c === 'confirm' && this.overlay && this.state === 'won') this.leaveClear(() => this.nextLevel());
     });
 
     this.buildLevel();
     Audio.startMusic();
     this.cameras.main.fadeIn(180, 43, 45, 66);
+    if (!this.resumed) Portal.levelStarted(this.levelNum);
+    Portal.gameplay(true);
+    this.events.once('shutdown', () => Portal.gameplay(false));
   }
 
   private onTouchUI = () => {
@@ -534,7 +586,7 @@ export class GameScene extends Phaser.Scene {
       this.sysButtons.push(b);
       return b;
     };
-    this.hintBtn = mk('bulb', () => this.useHint(), '#f2b705');
+    this.hintBtn = mk('bulb', () => this.pressHint(), '#f2b705');
     if (this.hintUsed) { this.hintBtn.enabled = false; this.hintBtn.setAlpha(0.35); }
     mk('restart', () => this.restartLevel(), '#ff6a3d');
     this.muteBtn = mk(Audio.muted ? 'mute' : 'sound', () => this.toggleMute());
@@ -747,13 +799,15 @@ export class GameScene extends Phaser.Scene {
 
   private buildLevel(): void {
     const L = this.lvl;
+    this.ext = {};
+    for (const e of EXTS) e.init?.(this);
     const map = L.map;
     const gdefs = L.groups ?? {};
     const groupTiles = new Map<string, { tx: number; ty: number }[]>();
     const staticTiles: { tx: number; ty: number }[] = [];
     this.staticSolid = new Set();
     const solidAll = new Set<number>();
-    const key = (x: number, y: number) => y * 1000 + x;
+    const key = (x: number, y: number) => y * 10000 + x;
     const COLS = this.cols;
     let doorAt: { tx: number; ty: number } | null = null;
     const fakeAt: { tx: number; ty: number }[] = [];
@@ -871,6 +925,13 @@ export class GameScene extends Phaser.Scene {
 
     // Decorations: anti-gravity bubbles
     for (const d of L.decor ?? []) {
+      if (d.kind === 'shadow') {
+        // a dark spot on the floor: something is about to land there
+        const g = this.track(this.add.graphics().setDepth(0.6));
+        g.fillStyle(0x2b2d42, 0.32).fillEllipse((d.x + d.w / 2) * TILE, d.y * TILE + 4, d.w * TILE * 0.9, 12);
+        this.tweens.add({ targets: g, alpha: 0.55, duration: 500, yoyo: true, repeat: -1 });
+        continue;
+      }
       const g = this.track(this.add.graphics().setDepth(4.8));
       g.fillStyle(0x9ef0ff, 0.22).fillRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
       g.lineStyle(4, 0xe6fdff, 0.7).strokeRoundedRect(d.x * TILE, d.y * TILE, d.w * TILE, d.h * TILE, 40);
@@ -899,6 +960,11 @@ export class GameScene extends Phaser.Scene {
     this.ctrlFlip = false;
     this.ctrlMode = 'normal';
     this.gScale = 1;
+    this.inWater = false;
+    this.headUnder = false;
+    this.air = WATER.air;
+    this.strokeT = 0;
+    this.lastWet = -99;
     this.gravX = 0;
     this.lagQ = [];
     this.launchLock = 0;
@@ -992,8 +1058,8 @@ export class GameScene extends Phaser.Scene {
       id, def, tiles, container, bodies: [], ox: 0, oy: 0,
       visible: !def.hidden, solid: def.tile === '#' && !def.fake, state: 'idle',
       shakeT: 0, fallV: 0, move: null, chase: null, deadlyMove: false, deadlyEnd: false, dx: 0, dy: 0,
-      toss: null, eatX: null, eatSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
-      cx: 0, cy: 0, img: null, minTx: 0,
+      toss: null, eatX: null, eatSpeed: 0, growX: null, growSpeed: 0, active: false, frogVy: 0, frogAir: false, turretT: 0, revealed: !def.invisible, padCount: 0,
+      cx: 0, cy: 0, img: null, minTx: 0, belt: def.conveyor ?? 0, arrows: [], plates: [], pressed: false, cvx: 0, cvy: 0, push: 0, magnet: false, zapFx: null,
     };
     g.cx = ((Math.min(...tiles.map((v) => v.tx)) + Math.max(...tiles.map((v) => v.tx)) + 1) / 2) * TILE;
     g.cy = ((Math.min(...tiles.map((v) => v.ty)) + Math.max(...tiles.map((v) => v.ty)) + 1) / 2) * TILE;
@@ -1004,20 +1070,38 @@ export class GameScene extends Phaser.Scene {
       const minX = Math.min(...tiles.map((v) => v.tx)), minY = Math.min(...tiles.map((v) => v.ty));
       const maxX = Math.max(...tiles.map((v) => v.tx)), maxY = Math.max(...tiles.map((v) => v.ty));
       const k = `grp-${this.lvl.id}-${id}`;
-      if (!this.textures.exists(k)) {
-        const own = new Set(tiles.map((v) => v.ty * 1000 + v.tx));
-        const seam = (x: number, y: number) => !own.has(y * 1000 + x) && this.staticSolid.has(y * 1000 + x);
+      if (def.crate) {
+        // wooden crates instead of terrain
+        for (const v of tiles) container.add(this.add.image(v.tx * TILE, v.ty * TILE, def.look === 'cracked' ? 'crate-cracked' : 'crate').setOrigin(0).setScale(1 / RES));
+      } else if (!this.textures.exists(k)) {
+        const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
+        const seam = (x: number, y: number) => !own.has(y * 10000 + x) && this.staticSolid.has(y * 10000 + x);
         const bounds = { x: minX * TILE - 2, y: minY * TILE - 2, w: (maxX - minX + 1) * TILE + 4, h: (maxY - minY + 1) * TILE + 4 };
-        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 1000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
+        addTerrainTexture(this, k, drawTerrain(tiles, def.fake ? (x, y) => own.has(y * 10000 + x) || isSolidAll(x, y) : isSolidAll, this.pal, bounds, def.look, seam));
       }
-      const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
-      container.add(img);
-      g.img = img;
+      if (!def.crate) {
+        const img = this.add.image(minX * TILE - 2, minY * TILE - 2, k).setOrigin(0).setScale(1 / RES);
+        container.add(img);
+        g.img = img;
+      }
       container.setDepth(def.fake ? 6 : 0.5);
-      if (def.ice) img.setTint(0xbfe9ff);
-      if (def.tint) img.setTint(def.tint);
-      if (def.invisible) img.setAlpha(0);
-      if (def.conveyor) this.addConveyorArrows(container, tiles, def.conveyor);
+      if (def.ice) g.img?.setTint(0xbfe9ff);
+      if (def.tint) g.img?.setTint(def.tint);
+      if (def.invisible) g.img?.setAlpha(0);
+      if (def.conveyor) g.arrows = this.addConveyorArrows(container, tiles, def.conveyor);
+      if (def.button) {
+        // the button cap on every top (or, for a ceiling switch, bottom) tile of the group
+        const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
+        for (const v of tiles) {
+          const edge = def.ceilButton ? !own.has((v.ty + 1) * 10000 + v.tx) : !own.has((v.ty - 1) * 10000 + v.tx);
+          if (!edge) continue;
+          const y = def.ceilButton ? (v.ty + 1) * TILE : v.ty * TILE;
+          const cap = this.add.image(v.tx * TILE + TILE / 2, y + (def.ceilButton ? -1 : 1), `plate-${def.button}`).setScale(1 / RES).setOrigin(0.5, 1).setFlipY(!!def.ceilButton);
+          if (def.ceilButton) cap.setOrigin(0.5, 0);
+          container.add(cap);
+          g.plates.push(cap);
+        }
+      }
       if (def.turret) container.add(this.add.image(minX * TILE + 4, (minY + maxY + 1) / 2 * TILE, 'turret-mouth').setScale(1 / RES));
       if (!def.fake) {
         const rects = def.columns ? [...new Set(tiles.map((v) => v.tx))].flatMap((cx) => mergeRects(tiles.filter((v) => v.tx === cx))) : mergeRects(tiles);
@@ -1048,6 +1132,50 @@ export class GameScene extends Phaser.Scene {
       for (const v of tiles) this.addBall(v.tx, v.ty, g);
       if (def.frog) for (const b of this.balls) if (b.group === g) b.img.setTexture('frog');
       if (def.homing) for (const b of this.balls) if (b.group === g) b.img.setTexture('bird');
+    } else if (t === '?') {
+      // drawn and handled by a level extension only
+      container.setDepth(3);
+    } else if (t === '~') {
+      // water: a translucent body with a wavy surface where no water is above (drawn over the hero)
+      container.setDepth(4.6);
+      const own = new Set(tiles.map((v) => v.ty * 10000 + v.tx));
+      // drawn once into a texture (a live Graphics object would be re-tessellated every frame)
+      const x0 = Math.min(...tiles.map((v) => v.tx)) * TILE, y0 = Math.min(...tiles.map((v) => v.ty)) * TILE;
+      const x1 = (Math.max(...tiles.map((v) => v.tx)) + 1) * TILE, y1 = (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE;
+      const wkey = `water-${this.lvl.id}-${id}`;
+      if (!this.textures.exists(wkey)) {
+        const gfx = this.make.graphics({ x: 0, y: 0 }, false);
+        const deep = def.tint ?? 0x3aa6d8;
+        for (const v of tiles) {
+          const top = !own.has((v.ty - 1) * 10000 + v.tx);
+          const px = v.tx * TILE - x0, py = v.ty * TILE - y0;
+          gfx.fillStyle(deep, top ? 0.5 : 0.6).fillRect(px, py + (top ? 6 : 0), TILE, TILE - (top ? 6 : 0));
+          if (top) {
+            gfx.fillStyle(0xe6fbff, 0.85).fillRect(px, py + 5, TILE, 3);
+            gfx.fillStyle(0xe6fbff, 0.7).fillCircle(px + 10, py + 6, 3).fillCircle(px + 30, py + 6, 3);
+          }
+        }
+        gfx.generateTexture(wkey, x1 - x0, y1 - y0);
+        gfx.destroy();
+      }
+      container.addAt(this.add.image(x0, y0, wkey).setOrigin(0), 0);
+      if (def.current) for (const v of tiles) {
+        if ((v.tx + v.ty) % 2 !== 0) continue;
+        const a = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + TILE / 2, 'chevron').setScale(1 / RES).setAlpha(0.45);
+        a.setRotation(Math.atan2(def.current[1], def.current[0]));
+        container.add(a);
+        this.tweens.add({ targets: a, x: a.x + Math.cos(a.rotation) * 12, y: a.y + Math.sin(a.rotation) * 12, alpha: 0.1, duration: 600, repeat: -1 });
+      }
+      if (def.zap) {
+        // electrified water: yellow sparks while it is live
+        const z = this.add.graphics().setVisible(false);
+        for (const v of tiles) {
+          z.fillStyle(0xfff27a, 0.55).fillRect(v.tx * TILE, v.ty * TILE, TILE, TILE);
+          z.lineStyle(3, 0xffffff, 0.9).beginPath().moveTo(v.tx * TILE + 8, v.ty * TILE + 10).lineTo(v.tx * TILE + 20, v.ty * TILE + 22).lineTo(v.tx * TILE + 14, v.ty * TILE + 24).lineTo(v.tx * TILE + 30, v.ty * TILE + 34).strokePath();
+        }
+        container.add(z);
+        g.zapFx = z;
+      }
     } else if (t === 'H') {
       container.setDepth(4);
       const h = new Hero(this, g.cx, (Math.max(...tiles.map((v) => v.ty)) + 1) * TILE);
@@ -1064,16 +1192,20 @@ export class GameScene extends Phaser.Scene {
       }
     }
     container.setVisible(g.visible);
+    for (const e of EXTS) e.group?.(this, g);
   }
 
   /** Animated chevrons on a conveyor belt. */
-  private addConveyorArrows(c: Phaser.GameObjects.Container, tiles: { tx: number; ty: number }[], speed: number): void {
+  private addConveyorArrows(c: Phaser.GameObjects.Container, tiles: { tx: number; ty: number }[], speed: number): Phaser.GameObjects.Image[] {
     const tops = tiles.filter((v) => !tiles.some((u) => u.tx === v.tx && u.ty === v.ty - 1));
+    const out: Phaser.GameObjects.Image[] = [];
     for (const v of tops) {
       const img = this.add.image(v.tx * TILE + TILE / 2, v.ty * TILE + 9, 'chevron').setScale(1 / RES).setFlipX(speed < 0);
       c.add(img);
       this.tweens.add({ targets: img, x: img.x + Math.sign(speed) * 14, alpha: { from: 1, to: 0.35 }, duration: 420, repeat: -1 });
+      out.push(img);
     }
+    return out;
   }
 
   private addSpike(tx: number, ty: number, dir: Dir, group: GroupRT | null): void {
@@ -1121,7 +1253,7 @@ export class GameScene extends Phaser.Scene {
   // Main loop
 
   update(_time: number, delta: number): void {
-    if (!this.paused && !this.overlay) {
+    if (!this.paused && !this.overlay && !PortalState.paused) {
       const scale = this.slowmo > 0 ? 0.4 : 1;
       this.acc += Math.min(delta, 100) * scale;
       let n = 0;
@@ -1164,6 +1296,7 @@ export class GameScene extends Phaser.Scene {
 
     this.controlPlayer(k, jumpPressed);
     this.updateGroups();
+    for (const e of EXTS) e.tick?.(this);
     // moving platforms carry the hero standing on them
     if (this.ride && this.ride.solid && this.ride.visible && (this.ride.dx || this.ride.dy)) {
       this.player.x += this.ride.dx;
@@ -1186,11 +1319,65 @@ export class GameScene extends Phaser.Scene {
     this.checkInteractions();
   }
 
+  /** is the hero in water (centre), is his head under water, and the current there */
+  private updateWater(): void {
+    const b = this.pbody;
+    const cx = b.center.x, cy = b.center.y, hy = b.top + 4;
+    let inW = false, head = false, surf = false, zapped = false;
+    let cur: [number, number] = [0, 0];
+    for (const g of this.groups.values()) {
+      if (g.def.tile !== '~' || !g.visible) continue;
+      for (const t of g.tiles) {
+        const x = t.tx * TILE + g.ox, y = t.ty * TILE + g.oy;
+        if (cx >= x && cx < x + TILE) {
+          if (cy >= y && cy < y + TILE) {
+            inW = true;
+            if (g.def.zap) zapped = true;
+            if (g.def.current) cur = g.def.current;
+            // near the surface (no water above this tile, centre in its top part): a stroke jumps out
+            if (!g.tiles.some((u) => u.tx === t.tx && u.ty === t.ty - 1) && cy - y < 30) surf = true;
+          }
+          if (hy >= y && hy < y + TILE) head = true;
+        }
+      }
+    }
+    if (inW && !this.inWater && this.levelTick - this.lastWet > 12) {
+      // the splash: diving in takes most of your speed up or down
+      this.sfx('land');
+      this.emitDust.emitParticleAt(cx, cy, 6);
+      b.setVelocityY(b.velocity.y * 0.3);
+    }
+    if (zapped) { this.kill('zap'); return; }
+    this.inWater = inW;
+    this.headUnder = head && !surf;
+    this.current = cur;
+    if (this.strokeT > 0) this.strokeT--;
+    if (head) {
+      this.air--;
+      if (this.air <= 0) this.kill('drown');
+    } else this.air = Math.min(WATER.air, this.air + 6);
+  }
+
   private controlPlayer(k: Keys, jumpPressed: boolean): void {
+    this.updateWater();
     const b = this.pbody;
     const g = this.gdir;
     let vx = b.velocity.x;
     let vy = b.velocity.y;
+    const wet = this.inWater;
+    if (wet) this.lastWet = this.levelTick;
+    // just bobbed out of the surface: a jump still pushes off the water (like coyote time at a ledge)
+    const bob = !wet && !this.grounded && this.levelTick - this.lastWet <= 12;
+    if ((wet || bob) && jumpPressed) {
+      // a swim stroke (any time, not only on the ground); with the head above the surface: jump out
+      if (this.strokeT === 0) {
+        vy = this.headUnder && !bob ? -WATER.stroke : -PHYS.jumpVel * 0.85;
+        this.strokeT = WATER.strokeGap;
+        this.hero.jump();
+        this.sfx('jump');
+      }
+      jumpPressed = false;
+    }
     let dir = (k.right ? 1 : 0) - (k.left ? 1 : 0);
     const mode = this.ctrlMode;
     if (mode === 'flip') dir = -dir;
@@ -1206,11 +1393,14 @@ export class GameScene extends Phaser.Scene {
     }
     this.jumpedNow = false;
     // sideways pull and conveyor belts shift the speed you settle at
-    const belt = gr && this.ride?.def.conveyor ? this.ride.def.conveyor : 0;
-    const bias = this.gravX + belt;
+    const belt = gr && this.ride?.belt ? this.ride.belt : 0;
+    const bias = this.gravX + belt + (wet ? this.current[0] : 0);
     const grip = gr && this.ride?.def.ice ? 0.05 : 1;
-    const maxRun = mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun;
-    const accMul = (mode === 'turbo' ? 2 : 1) * grip;
+    const maxRun = (mode === 'turbo' ? PHYS.maxRun * 2 : PHYS.maxRun) * (wet ? WATER.run : 1);
+    const m: MoveCtx = { dir, jumpPressed, grounded: gr, maxRun, accMul: (mode === 'turbo' ? 2 : 1) * grip, bias, jumpMul: 1, gravMul: 1, vx, vy, keys: k };
+    for (const e of EXTS) e.move?.(this, m);
+    ({ dir, jumpPressed, vx, vy } = m);
+    const accMul = m.accMul;
     if (mode === 'frozen') {
       jumpPressed = false; // no control at all, and you keep sliding
     } else if (this.launchLock > 0) {
@@ -1218,14 +1408,14 @@ export class GameScene extends Phaser.Scene {
     } else if (dir !== 0) {
       const turning = vx !== bias && Math.sign(vx - bias) !== dir;
       const a = gr ? (turning ? PHYS.groundDecel : PHYS.groundAccel) : PHYS.airAccel;
-      vx = approach(vx, dir * maxRun + bias, a * accMul * DT);
+      vx = approach(vx, dir * m.maxRun + m.bias, a * accMul * DT);
     } else {
-      vx = approach(vx, bias, (gr ? PHYS.groundDecel : PHYS.airDecel) * accMul * DT);
+      vx = approach(vx, m.bias, (gr ? PHYS.groundDecel : PHYS.airDecel) * accMul * DT);
     }
     if (jumpPressed) this.buffer = PHYS.bufferTicks;
     if (gr) this.coyote = PHYS.coyoteTicks;
     if (this.buffer > 0 && this.coyote > 0) {
-      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * g;
+      vy = -PHYS.jumpVel * (hic ? HICCUP_VEL : mode === 'superjump' ? SUPERJUMP : 1) * m.jumpMul * g;
       this.jumpedNow = true;
       this.jumping = true;
       this.coyote = 0;
@@ -1242,11 +1432,15 @@ export class GameScene extends Phaser.Scene {
       this.jumping = false;
     }
     if (vy * g >= 0) this.jumping = false;
-    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale;
-    vy += g * PHYS.gravity * mul * DT;
-    if (vy * g > PHYS.maxFall) vy = PHYS.maxFall * g;
+    const mul = (vy * g > 0 ? PHYS.fallGravityMul : 1) * this.gScale * (wet ? WATER.gravity : 1) * m.gravMul;
+    // a vertical current (a stream, a waterfall) carries the swimmer at its own speed
+    if (wet && this.current[1] !== 0) vy = approach(vy, this.current[1], Math.max(1500, Math.abs(this.current[1]) * 4) * DT);
+    else vy += g * PHYS.gravity * mul * DT;
+    const fallCap = wet ? WATER.maxFall + Math.max(0, this.current[1]) * 0.4 : PHYS.maxFall;
+    if (vy * g > fallCap) vy = fallCap * g;
     b.setVelocity(vx, vy);
     this.lastVy = vy;
+    this.inputDir = mode === 'frozen' || this.launchLock > 0 ? 0 : dir;
   }
 
   private afterPhysics(): void {
@@ -1271,6 +1465,17 @@ export class GameScene extends Phaser.Scene {
       this.hero.land(impact);
       if (impact > 350) { this.dust(6); this.sfx('land'); }
     }
+    // pushing a crate: walking into its side moves it next tick
+    const dir = this.inputDir;
+    if (dir !== 0 && (dir > 0 ? b.blocked.right : b.blocked.left)) {
+      for (const g of this.groups.values()) {
+        if (g.def.crate !== true || !g.visible || g.state !== 'idle') continue;
+        const box = this.crateBox(g);
+        const face = dir > 0 ? box.x : box.x + box.w;
+        const edge = dir > 0 ? b.right : b.left;
+        if (Math.abs(face - edge) <= 3 && b.bottom > box.y + 4 && b.top < box.y + box.h - 2) g.push = dir * CRATE_PUSH;
+      }
+    }
     // fell out of the world
     if ((this.gdir > 0 && b.y > WORLD_H + 30) || (this.gdir < 0 && b.bottom < -30)) this.kill('pit');
   }
@@ -1281,6 +1486,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkInteractions(): void {
+    for (const e of EXTS) { if (this.state !== 'play') return; e.interact?.(this); }
+    if (this.state !== 'play') return;
     const pr = this.playerRect(3);
     // spikes
     for (const s of this.spikes) {
@@ -1468,6 +1675,45 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * The bulb. Where the portal has rewarded ads, it asks "Watch an ad for the hint": the hint is given only when the
+   * SDK confirms the reward; otherwise "No ad available right now, try again later" and the hint stays unused. On the
+   * web build (and where rewarded ads are not supported) the hint is free. Still one hint per level.
+   */
+  pressHint(): void {
+    if (this.hintUsed || this.state !== 'play' || this.adBusy) return;
+    if (!Portal.rewardedSupported) { this.useHint(); return; }
+    if (this.overlay) return;
+    const c = this.makeOverlay();
+    c.setName('hintAd');
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    c.add(panel(this, cx, cy, 560, 300, 0xfff6d5));
+    c.add(this.add.image(cx, cy - 92, 'icon-bulb').setScale(1.3 / RES));
+    c.add(fitText(label(this, cx, cy - 18, t('ui.hintAd'), 30, '#ffd23f', 8), 500));
+    const no = new Button(this, cx - 110, cy + 80, { w: 150, h: 64, icon: 'left', color: '#ff8a5b' }, () => {
+      if (this.adBusy) return;
+      this.closeOverlay();
+    });
+    const yes = new Button(this, cx + 110, cy + 80, { w: 150, h: 64, icon: 'play', color: '#6fd36b' }, () => {
+      if (this.adBusy) return;
+      this.adBusy = true;
+      void Portal.rewarded().catch(() => false).then((ok) => {
+        this.adBusy = false;
+        if (!this.sys.isActive()) return;
+        this.closeOverlay();
+        if (ok) this.useHint();
+        else {
+          const box = this.showHintBox(t('ui.adNone'));
+          box.setName('adNone');
+          this.tweens.add({ targets: box, alpha: 0, delay: 2600, duration: 400, onComplete: () => { box.destroy(); if (this.hintBox === box) this.hintBox = null; } });
+        }
+      });
+    });
+    no.setName('hintAdNo');
+    yes.setName('hintAdYes');
+    c.add([no, yes]);
+  }
+
   /** Spend the level's one hint: describe (and highlight) the next trap ahead of the hero. */
   useHint(): void {
     if (this.hintUsed || this.state === 'won') return;
@@ -1522,7 +1768,7 @@ export class GameScene extends Phaser.Scene {
   /** Is there solid ground anywhere above the hero (shelter from lightning)? */
   private roofed(): boolean {
     const tx = Math.floor(this.pbody.center.x / TILE);
-    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 1000 + tx)) return true;
+    for (let ty = Math.floor(this.pbody.top / TILE) - 1; ty >= 0; ty--) if (this.staticSolid.has(ty * 10000 + tx)) return true;
     return false;
   }
 
@@ -1540,14 +1786,28 @@ export class GameScene extends Phaser.Scene {
   // Triggers & actions
 
   private checkTriggers(): void {
+    this.updateButtons();
     const pr = this.playerRect(0);
     for (const t of this.triggers) {
-      if (t.def.hold && t.def.when.zone) {
-        // zone effects: on while inside, undone on leaving
-        const [x, y, ww, hh] = t.def.when.zone;
-        const inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
-        if (inside && !t.inside) { t.inside = true; this.troll(t.def.troll); this.runActions(t.def.do, t.fired); t.fired = true; }
-        else if (!inside && t.inside) { t.inside = false; this.runActions(t.def.undo ?? [], true); }
+      if (t.def.hold && (t.def.when.zone || t.def.when.touch)) {
+        // zone effects: on while inside (or while touching the group), undone on leaving
+        let inside = false;
+        if (t.def.when.zone) {
+          const [x, y, ww, hh] = t.def.when.zone;
+          inside = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+          if (t.def.when.crate) inside = this.crateIn(t.def.when.crate, t.def.when.zone);
+        } else inside = this.touchingGroup(t.def.when.touch!, pr);
+        if (inside && !t.inside) {
+          t.inside = true;
+          if (t.undoAt !== undefined) t.undoAt = undefined;
+          else { this.troll(t.def.troll); this.runActions(t.def.do, t.fired); }
+          t.fired = true;
+        } else if (!inside && t.inside) {
+          t.inside = false;
+          if (t.def.undoDelay) t.undoAt = this.levelTick + t.def.undoDelay;
+          else this.runActions(t.def.undo ?? [], true);
+        }
+        if (t.undoAt !== undefined && this.levelTick >= t.undoAt) { t.undoAt = undefined; this.runActions(t.def.undo ?? [], true); }
         continue;
       }
       if (t.fired) continue;
@@ -1557,17 +1817,16 @@ export class GameScene extends Phaser.Scene {
       else if (w.after) ok = this.fired.has(w.after);
       else if (w.zone) {
         const [x, y, ww, hh] = w.zone;
-        ok = overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
+        ok = w.crate && !w.crateZone ? this.crateIn(w.crate, w.zone) : overlap(pr, { x: x * TILE, y: y * TILE, w: ww * TILE, h: hh * TILE });
         if (ok && w.airborne) ok = !this.grounded;
         if (ok && w.grounded) ok = this.grounded;
         if (ok && w.landFaster !== undefined) ok = this.grounded && !this.wasGrounded && Math.abs(this.lastVy) >= w.landFaster;
-      } else if (w.touch) {
-        const g = this.groups.get(w.touch);
-        if (g && g.visible) {
-          const e = { x: pr.x - 2, y: pr.y - 2, w: pr.w + 4, h: pr.h + 4 };
-          for (const tt of g.tiles) if (overlap(e, { x: tt.tx * TILE + g.ox, y: tt.ty * TILE + g.oy, w: TILE, h: TILE })) ok = true;
-        }
-      }
+      } else if (w.touch) ok = this.touchingGroup(w.touch, pr);
+      else if (w.ext) ok = true;
+      // a level extension's condition (alone, or on top of the zone / touch)
+      if (ok && w.ext) ok = EXTS.some((e) => e.when?.(this, w.ext as Record<string, any>) === true);
+      // the hero's condition and, at the same time, a crate in its zone
+      if (ok && w.crate && w.crateZone) ok = this.crateIn(w.crate, w.crateZone);
       if (!ok) continue;
       t.fired = true;
       if (t.def.id) this.fired.add(t.def.id);
@@ -1578,6 +1837,28 @@ export class GameScene extends Phaser.Scene {
         if (t.def.every) this.scheduled.push({ at: this.levelTick + t.def.every, actions: t.def.do, every: t.def.every, repeat: true, stopAt: t.def.stopAt });
       }
     }
+  }
+
+  /** button caps sink while the hero touches their block (presentation; the trigger does the work) */
+  private updateButtons(): void {
+    const pr = this.playerRect(0);
+    for (const g of this.groups.values()) {
+      if (!g.plates.length) continue;
+      const p = this.touchingGroup(g.id, pr);
+      if (p === g.pressed) continue;
+      g.pressed = p;
+      if (p) this.sfx('click');
+      for (const im of g.plates) im.setScale(1 / RES, (p ? 0.45 : 1) / RES);
+    }
+  }
+
+  /** the hero touches a visible group (stands on it, bumps it from below or the side) */
+  private touchingGroup(id: string, pr: R): boolean {
+    const g = this.groups.get(id);
+    if (!g || !g.visible) return false;
+    const e = { x: pr.x - 2, y: pr.y - 2, w: pr.w + 4, h: pr.h + 4 };
+    for (const tt of g.tiles) if (overlap(e, { x: tt.tx * TILE + g.ox, y: tt.ty * TILE + g.oy, w: TILE, h: TILE })) return true;
+    return false;
   }
 
   private runScheduled(): void {
@@ -1601,7 +1882,12 @@ export class GameScene extends Phaser.Scene {
   private runActions(actions: Action[], quiet = false): void {
     let trap = false;
     for (const a of actions) {
-      if ('fall' in a) {
+      if ('ext' in a) {
+        for (const e of EXTS) {
+          const r = e.action?.(this, a as Record<string, any>);
+          if (r) { if (r === 'trap') trap = true; break; }
+        }
+      } else if ('fall' in a) {
         const g = this.grp(a.fall);
         g.state = 'shaking';
         g.shakeT = a.shake ?? 6;
@@ -1624,11 +1910,38 @@ export class GameScene extends Phaser.Scene {
         g.move = { fx: g.ox, fy: g.oy, tx: g.ox + a.by[0] * TILE, ty: g.oy + a.by[1] * TILE, t: 0, dur: Math.max(1, a.ticks), deadly: !!a.deadly, returnAfter: a.returnAfter, returnTicks: a.returnTicks, back: false };
         g.deadlyMove = !!a.deadly;
         if (a.deadly) { g.solid = false; trap = true; }
+      } else if ('respawn' in a) {
+        // a crate goes back to where it was drawn (a chute drops the next one)
+        const g = this.grp(a.respawn);
+        g.ox = 0; g.oy = 0; g.cvx = 0; g.cvy = 0; g.state = 'idle';
+        g.visible = true; g.container.setVisible(true);
+      } else if ('magnet' in a) {
+        const g = this.grp(a.magnet);
+        g.magnet = a.on;
+        if (a.on) trap = true;
+      } else if ('shove' in a) {
+        const g = this.grp(a.shove);
+        g.cvx = a.vx;
+        trap = true;
+      } else if ('belt' in a) {
+        const g = this.grp(a.belt);
+        g.belt = a.speed;
+        for (const im of g.arrows) im.destroy();
+        g.arrows = a.speed ? this.addConveyorArrows(g.container, g.tiles, a.speed) : [];
+        this.sfx('click');
       } else if ('toss' in a) {
         const g = this.grp(a.toss);
         g.toss = { vx: a.vel[0], vy: a.vel[1] };
         g.visible = true;
         g.container.setVisible(true);
+        trap = true;
+      } else if ('grow' in a) {
+        const g = this.grp(a.grow);
+        g.growX = g.minTx * TILE;
+        g.growSpeed = a.speed;
+        g.visible = true;
+        g.container.setVisible(true);
+        if (g.img) g.img.setCrop(0, 0, 0, g.img.height);
         trap = true;
       } else if ('eat' in a) {
         const g = this.grp(a.eat);
@@ -1796,6 +2109,7 @@ export class GameScene extends Phaser.Scene {
         }
         if (g.move && g.move.t < 0) { g.ox = g.move.fx; g.oy = g.move.fy; }
       }
+      if (g.def.crate === true && g.state === 'idle' && g.visible) this.crateStep(g);
       if (g.chase) {
         g.ox += g.chase.vx;
         g.oy += g.chase.vy;
@@ -1809,6 +2123,7 @@ export class GameScene extends Phaser.Scene {
         const base = z.getData('base') as { x: number; y: number };
         z.setPosition(base.x + g.ox, base.y + g.oy);
         if (g.eatX !== null && base.x + TILE / 2 <= g.eatX) (z.body as Phaser.Physics.Arcade.Body).enable = false;
+        if (g.growX !== null) (z.body as Phaser.Physics.Arcade.Body).enable = base.x + TILE / 2 <= g.growX;
       }
     }
     this.updateHunters();
@@ -1822,6 +2137,86 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Special group behaviours (all deterministic, per tick). */
+  /** a crate (group) overlaps the zone */
+  private crateIn(id: string, [x, y, w, h]: [number, number, number, number]): boolean {
+    const g = this.groups.get(id);
+    if (!g || !g.visible || g.state === 'gone') return false;
+    const b = this.crateBox(g);
+    return overlap({ x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 }, { x: x * TILE, y: y * TILE, w: w * TILE, h: h * TILE });
+  }
+
+  /** a crate's box in world px (its tiles + offset) */
+  private crateBox(g: GroupRT): R {
+    const xs = g.tiles.map((t) => t.tx), ys = g.tiles.map((t) => t.ty);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return { x: x0 * TILE + g.ox, y: y0 * TILE + g.oy, w: (Math.max(...xs) - x0 + 1) * TILE, h: (Math.max(...ys) - y0 + 1) * TILE };
+  }
+
+  /** is the box blocked by the level (static tiles or another visible solid group)? */
+  private boxBlocked(r: R, self: GroupRT): GroupRT | 'static' | null {
+    const x0 = Math.floor((r.x + 0.5) / TILE), x1 = Math.floor((r.x + r.w - 0.5) / TILE);
+    const y0 = Math.floor((r.y + 0.5) / TILE), y1 = Math.floor((r.y + r.h - 0.5) / TILE);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (this.staticSolid.has(ty * 10000 + tx)) return 'static';
+    for (const g of this.groups.values()) {
+      if (g === self || !g.visible || !g.solid || g.state === 'gone') continue;
+      for (const t of g.tiles) if (overlap({ x: r.x + 0.5, y: r.y + 0.5, w: r.w - 1, h: r.h - 1 }, { x: t.tx * TILE + g.ox, y: t.ty * TILE + g.oy, w: TILE, h: TILE })) return g;
+    }
+    return null;
+  }
+
+  /** crates fall, are pushed, slide on ice, ride belts, and crush the hero when they land on him */
+  private crateStep(g: GroupRT): void {
+    const box = this.crateBox(g);
+    if (g.magnet) {
+      // held by the magnet: no pushing, it only rises (slowly) until it hits something
+      g.push = 0;
+      g.cvx = 0;
+      g.cvy = Math.max(-1.6, g.cvy - 0.2);
+      let up = -g.cvy;
+      while (up > 0) {
+        const d = Math.min(1, up);
+        if (this.boxBlocked({ x: box.x, y: box.y - d, w: box.w, h: box.h }, g)) { g.cvy = 0; break; }
+        box.y -= d; g.oy -= d; up -= d;
+      }
+      return;
+    }
+    const under = this.boxBlocked({ x: box.x, y: box.y + 2, w: box.w, h: box.h }, g);
+    const floor = under && under !== 'static' ? under : null;
+    const onGround = !!under;
+    // horizontal: the hero's push, ice keeps the speed, belts carry
+    if (g.push) g.cvx = g.push;
+    else if (!(onGround && floor?.def.ice) && onGround) g.cvx = 0;
+    const belt = onGround && floor?.belt ? floor.belt / 60 : 0;
+    g.push = 0;
+    let dx = g.cvx + belt;
+    const step = Math.sign(dx);
+    while (dx !== 0) {
+      const d = Math.abs(dx) >= 1 ? step : dx;
+      const bl = this.boxBlocked({ x: box.x + d, y: box.y, w: box.w, h: box.h }, g);
+      if (bl) {
+        // a crate sliding behind another one keeps its speed (the front one may fall away next tick)
+        if (bl === 'static' || bl.def.crate !== true) g.cvx = 0;
+        break;
+      }
+      box.x += d; g.ox += d; dx -= d;
+    }
+    // vertical: gravity (or a magnet lifting it slowly)
+    g.cvy = onGround && g.cvy >= 0 ? 0 : Math.min(14, g.cvy + 0.55);
+    let dy = g.cvy;
+    while (dy > 0) {
+      const d = Math.min(1, dy);
+      if (this.boxBlocked({ x: box.x, y: box.y + d, w: box.w, h: box.h }, g)) {
+        if (g.cvy > 6) { this.sfx('slam'); this.cameras.main.shake(90, 0.005); }
+        g.cvy = 0;
+        break;
+      }
+      box.y += d; g.oy += d; dy -= d;
+    }
+    // a falling crate lands on the hero
+    if (g.cvy > 3 && this.state === 'play' && overlap(this.playerRect(4), box) && this.pbody.center.y > box.y + box.h / 2) this.kill('crush');
+    if (box.y > WORLD_H + 80) { g.state = 'gone'; g.visible = false; g.container.setVisible(false); }
+  }
+
   private groupBehaviour(g: GroupRT): void {
     const d = g.def;
     const hx = this.pbody.center.x, hy = this.pbody.center.y;
@@ -1845,7 +2240,7 @@ export class GameScene extends Phaser.Scene {
       g.oy += (dy / dist) * d.homing;
       // it cannot fly through walls: crashing into solid ground ends it
       const tx = Math.floor((g.cx + g.ox) / TILE), ty = Math.floor((g.cy + g.oy) / TILE);
-      if (this.staticSolid.has(ty * 1000 + tx)) {
+      if (this.staticSolid.has(ty * 10000 + tx)) {
         g.active = false;
         g.visible = false;
         g.container.setVisible(false);
@@ -1878,6 +2273,10 @@ export class GameScene extends Phaser.Scene {
       g.toss.vy += 0.5;
       if (g.oy > WORLD_H + 200) { g.toss = null; g.visible = false; g.container.setVisible(false); }
     }
+    if (g.growX !== null) {
+      g.growX += g.growSpeed;
+      if (g.img) g.img.setCrop(0, 0, Math.max(0, (g.growX - (g.minTx * TILE - 2)) * RES), g.img.height);
+    }
     if (g.eatX !== null) {
       g.eatX += g.eatSpeed;
       if (g.img) {
@@ -1893,7 +2292,12 @@ export class GameScene extends Phaser.Scene {
       sh.x += sh.vx;
       sh.left -= Math.abs(sh.vx);
       const tx = Math.floor(sh.x / TILE), ty = Math.floor(sh.y / TILE);
-      if (sh.left <= 0 || this.staticSolid.has(ty * 1000 + tx)) { sh.left = -1; sh.img.destroy(); }
+      const blocked = [...this.groups.values()].some((g) => g.def.crate && g.visible && g.state === 'idle' && overlap({ x: sh.x - 8, y: sh.y - 8, w: 16, h: 16 }, this.crateBox(g)));
+      if (sh.left <= 0 || blocked || this.staticSolid.has(ty * 10000 + tx)) {
+        if (blocked) { this.emitDust.emitParticleAt(sh.x, sh.y, 5); this.sfx('land'); }
+        sh.left = -1;
+        sh.img.destroy();
+      }
     }
     this.shots = this.shots.filter((sh) => sh.left >= 0);
     if (this.clone) {
@@ -1993,6 +2397,8 @@ export class GameScene extends Phaser.Scene {
     this.state = 'won';
     this.stateT = 0;
     Save.complete(this.lvl.id, LEVELS.length);
+    Portal.levelCompleted(this.levelNum);
+    Portal.gameplay(false);
     this.pbody.setVelocity(0, 0);
     this.pbody.enable = false;
     this.door?.pop();
@@ -2004,10 +2410,11 @@ export class GameScene extends Phaser.Scene {
 
   private showComplete(): void {
     const last = this.levelNum >= LEVELS.length;
+    if (last) { this.showFinalWin(); return; }
     const c = this.makeOverlay();
     const cx = WORLD_W / 2, cy = WORLD_H / 2;
     c.add(panel(this, cx, cy, 640, 420, 0xfff6d5));
-    const t1 = fitText(label(this, cx, cy - 130, last ? t('ui.beatGame') : t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
+    const t1 = fitText(label(this, cx, cy - 130, t('ui.levelClear', { n: this.levelNum }), 30, '#6fd36b', 7), 600);
     const msg = fitText(label(this, cx, cy - 64, t(this.lvl.winMessage), 46, '#ffd23f', 10), 600);
     const d = this.deathsLevel;
     const t2 = fitText(label(this, cx, cy + 6, d === 0 ? t('ui.deathsNone') : t('ui.deathsLevel', { n: d }), 28, '#ffffff', 7), 600);
@@ -2016,10 +2423,47 @@ export class GameScene extends Phaser.Scene {
     const ms = msg.scale;
     msg.setScale(0.2);
     this.tweens.add({ targets: msg, scale: ms, duration: 320, ease: 'Back.Out' });
-    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.toSelect());
-    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel());
-    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: last ? t('ui.menu') : t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.nextLevel());
+    const bLv = new Button(this, cx - 200, cy + 130, { w: 170, h: 64, icon: 'menu', text: t('ui.levels'), fontSize: 22, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
+    const bRe = new Button(this, cx - 15, cy + 130, { w: 180, h: 64, icon: 'restart', text: t('ui.retry'), fontSize: 22, color: '#9f7bd8' }, () => this.restartLevel()).setName('clearRetry');
+    const bNx = new Button(this, cx + 190, cy + 130, { w: 190, h: 72, icon: 'play', text: t('ui.next'), fontSize: 30, color: '#6fd36b' }, () => this.leaveClear(() => this.nextLevel())).setName('clearNext');
     c.add([bLv, bRe, bNx]);
+  }
+
+  /** After the very last level: the end of the game (every earlier level shows the normal level-clear card). */
+  private showFinalWin(): void {
+    const c = this.makeOverlay();
+    c.setName('finalWin');
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    c.add(panel(this, cx, cy, 760, 500, 0x2b2d42));
+    for (let i = 0; i < 5; i++) {
+      const st = this.add.image(cx + (i - 2) * 92, cy - 170 + Math.abs(i - 2) * 14, 'icon-star').setScale(1.5 / RES).setTint(0xffd23f);
+      this.tweens.add({ targets: st, angle: { from: -12, to: 12 }, duration: 520 + i * 60, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+      c.add(st);
+    }
+    const title = fitText(label(this, cx, cy - 78, t('ui.beatGame'), 58, '#ffd23f', 12), 700);
+    const sub = fitText(label(this, cx, cy - 4, t('ui.finalSub', { n: LEVELS.length }), 26, '#fff6d5', 6), 700);
+    const d = fitText(label(this, cx, cy + 56, t('ui.deathsTotal', { n: Save.get().totalDeaths }), 26, '#ffffff', 7), 700);
+    c.add([title, sub, d]);
+    const ts = title.scale;
+    title.setScale(0.2);
+    this.tweens.add({ targets: title, scale: ts, duration: 420, ease: 'Back.Out' });
+    this.time.addEvent({ delay: 500, repeat: 8, callback: () => this.emitConfetti.emitParticleAt(this.cameras.main.midPoint.x + Phaser.Math.Between(-400, 400), this.cameras.main.worldView.y + 40, 30) });
+    const bLv = new Button(this, cx - 140, cy + 160, { w: 220, h: 68, icon: 'menu', text: t('ui.levels'), fontSize: 24, color: '#5b8cff' }, () => this.leaveClear(() => this.toSelect())).setName('clearLevels');
+    const bMe = new Button(this, cx + 140, cy + 160, { w: 220, h: 68, icon: 'play', text: t('ui.menu'), fontSize: 26, color: '#6fd36b' }, () => this.leaveClear(() => this.toTitle())).setName('clearMenu');
+    c.add([bLv, bMe]);
+  }
+
+  /**
+   * "Next level" / "Levels" on the level-clear card: the only place an interstitial may show (portal builds; the
+   * portal decides whether one does). Never during a level, never after a death, no pre-roll.
+   */
+  private leaveClear(go: () => void): void {
+    if (this.adBusy || this.state !== 'won') return;
+    this.adBusy = true;
+    void Portal.interstitial().catch(() => undefined).then(() => {
+      this.adBusy = false;
+      if (this.sys.isActive()) go();
+    });
   }
 
   nextLevel(): void {
@@ -2070,9 +2514,9 @@ export class GameScene extends Phaser.Scene {
     const items: [string, string, string, () => void][] = [
       ['play', t('ui.resume'), '#6fd36b', () => this.togglePause()],
       ['restart', t('ui.restart'), '#9f7bd8', () => this.restartLevel()],
-      ['menu', t('ui.levels'), '#5b8cff', () => this.toSelect()],
+      ['menu', t('ui.levels'), '#5b8cff', () => { Portal.levelFailed(this.levelNum); this.toSelect(); }],
     ];
-    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 112 + i * 78, { w: 300, h: 62, icon, text, fontSize: 26, color }, fn)));
+    items.forEach(([icon, text, color, fn], i) => c.add(new Button(this, cx, cy - 112 + i * 78, { w: 300, h: 62, icon, text, fontSize: 26, color }, fn).setName(['pauseResume', 'pauseRestart', 'pauseLevels'][i])));
     const mb = new Button(this, cx, cy + 122, { w: 300, h: 56, icon: Audio.muted ? 'mute' : 'sound', text: Audio.muted ? t('ui.soundOff') : t('ui.soundOn'), fontSize: 22, color: '#ff8a5b' }, () => {
       this.toggleMute();
       mb.setIcon(Audio.muted ? 'mute' : 'sound');
@@ -2080,7 +2524,7 @@ export class GameScene extends Phaser.Scene {
     });
     c.add(mb);
     const lb = new Button(this, cx, cy + 192, { w: 300, h: 56, icon: 'globe', text: currentLangName(), fontSize: 22, color: '#41c6c0' }, () => {
-      openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed }); });
+      openLanguagePicker(this, c, () => { this.closeOverlay(); this.paused = false; this.scene.restart({ level: this.levelNum, checkpoint: this.cpIdx, hintUsed: this.hintUsed, resume: true }); });
     });
     lb.setName('langbtn');
     c.add(lb);
@@ -2098,7 +2542,34 @@ export class GameScene extends Phaser.Scene {
     this.emitDust.emitParticleAt(b.center.x, this.gdir > 0 ? b.bottom : b.top, n);
   }
 
+  private renderZap(): void {
+    for (const g of this.groups.values()) {
+      if (!g.def.zap) continue;
+      const on = g.visible;
+      g.container.setAlpha(on ? 0.75 + 0.25 * Math.sin(this.tick * 0.9) : 1);
+      for (const o of g.container.list) if (o instanceof Phaser.GameObjects.Image) o.setTint(on ? 0xfff27a : 0xffffff);
+      if (g.zapFx) g.zapFx.setVisible(on);
+    }
+  }
+
+  private renderAir(): void {
+    if (!this.airGfx || !this.airGfx.active) this.airGfx = this.track(this.add.graphics().setDepth(7));
+    const g = this.airGfx;
+    g.clear();
+    if (this.air >= WATER.air || this.state !== 'play') return;
+    const n = Math.ceil((this.air / WATER.air) * 4);
+    const b = this.pbody;
+    for (let i = 0; i < 4; i++) {
+      const x = b.center.x - 27 + i * 18, y = b.top - 22;
+      g.lineStyle(2.5, 0x2b2d42, 0.8).strokeCircle(x, y, 6.5);
+      if (i < n) g.fillStyle(0xbfefff, 0.95).fillCircle(x, y, 5);
+    }
+  }
+
   private render(dt: number): void {
+    for (const e of EXTS) e.render?.(this, dt);
+    this.renderAir();
+    this.renderZap();
     if (!this.pbody) return;
     const b = this.pbody;
     if (this.state !== 'won') {
@@ -2239,6 +2710,8 @@ export class GameScene extends Phaser.Scene {
       deathsLevel: this.deathsLevel, deathsTotal: Save.get().totalDeaths, gravity: this.gdir,
       fired: [...this.fired], doorX: this.doorPos.x, doorY: this.doorPos.y, lastDeath: this.lastDeath,
       trolls: [...this.trollsFired], checkpoint: this.cpIdx >= 0, worldW: this.worldW, controlsFlipped: this.ctrlFlip,
+      air: this.air, wet: this.inWater, headUnder: this.headUnder,
+      ext: Object.assign({}, ...EXTS.map((e) => e.snapshot?.(this) ?? {})),
       hudDeaths: this.deathText.text, ctrlMode: this.ctrlMode, gScale: this.gScale, camFrozen: this.camFrozen, camFlip: this.camFlip,
       camZoom: this.camZoomMul, hintUsed: this.hintUsed, hint: this.hintShown ? this.hintShown.text : '',
       g: Object.fromEntries([...this.groups.values()].map((g) => [g.id, [Math.round(g.ox), Math.round(g.oy), g.visible ? 1 : 0]])),
@@ -2260,24 +2733,24 @@ function approach(v: number, target: number, step: number): number {
 
 /** Greedy merge of tiles into rectangles (fewer physics bodies, no seams). */
 function mergeRects(tiles: { tx: number; ty: number }[]): { x: number; y: number; w: number; h: number }[] {
-  const set = new Set(tiles.map((t) => t.ty * 1000 + t.tx));
+  const set = new Set(tiles.map((t) => t.ty * 10000 + t.tx));
   const used = new Set<number>();
   const out: { x: number; y: number; w: number; h: number }[] = [];
   const sorted = [...tiles].sort((a, b) => a.ty - b.ty || a.tx - b.tx);
   for (const t of sorted) {
-    const k = t.ty * 1000 + t.tx;
+    const k = t.ty * 10000 + t.tx;
     if (used.has(k)) continue;
     let w = 1;
-    while (set.has(t.ty * 1000 + t.tx + w) && !used.has(t.ty * 1000 + t.tx + w)) w++;
+    while (set.has(t.ty * 10000 + t.tx + w) && !used.has(t.ty * 10000 + t.tx + w)) w++;
     let h = 1;
     outer: for (;;) {
       for (let i = 0; i < w; i++) {
-        const kk = (t.ty + h) * 1000 + t.tx + i;
+        const kk = (t.ty + h) * 10000 + t.tx + i;
         if (!set.has(kk) || used.has(kk)) break outer;
       }
       h++;
     }
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 1000 + t.tx + i);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add((t.ty + j) * 10000 + t.tx + i);
     out.push({ x: t.tx, y: t.ty, w, h });
   }
   return out;

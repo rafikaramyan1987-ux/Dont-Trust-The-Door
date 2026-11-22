@@ -17,6 +17,9 @@
 //  8. The camera never hides the hero: an arrow at the screen edge shows him (camera freeze).
 //  9. Layouts and touch (desktop, phone landscape, portrait), full jump on ▲, restart button.
 // 10. No console errors; build < 10 MB.
+//
+// Sharding (the CI matrix): `--levels 11-15` runs the per-level parts (1, 2, 2b) for those levels only, `--general`
+// runs only the level-independent parts (3-10), `--levels 1-5 --general` both. No arguments: everything (npm test).
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { serveDist, launch, openGame, replay, ROOT } from './harness.mjs';
@@ -35,7 +38,15 @@ const perf = (ok, name, detail = '') => {
 };
 const replays = Object.fromEntries(readdirSync(join(ROOT, 'tests', 'replays')).filter((f) => f.endsWith('.json')).sort()
   .map((f) => [Number(f.match(/\d+/)[0]), JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', f), 'utf8'))]));
-const LEVELS = readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort().map((f) => JSON.parse(readFileSync(join(ROOT, 'src', 'levels', f), 'utf8')));
+const ALL_LEVELS = readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort().map((f) => JSON.parse(readFileSync(join(ROOT, 'src', 'levels', f), 'utf8')));
+const argv = process.argv.slice(2);
+const range = argv.includes('--levels') ? argv[argv.indexOf('--levels') + 1].split('-').map(Number) : null;
+const GENERAL = !range || argv.includes('--general');
+const LEVELS = range ? ALL_LEVELS.filter((L) => L.id >= range[0] && L.id <= (range[1] ?? range[0])) : argv.includes('--general') ? [] : ALL_LEVELS;
+const SHARD = range ? `-L${range[0]}-${range[1] ?? range[0]}${GENERAL ? '-general' : ''}` : argv.includes('--general') ? '-general' : '';
+/** checkpoints of a level (the C tiles) */
+const cpsOf = (L) => L.map.reduce((n, r) => n + [...r].filter((c) => c === 'C').length, 0);
+const TRAP_TOTAL = LEVELS.reduce((n, L) => n + L.trolls.length, 0);
 const EN = JSON.parse(readFileSync(join(ROOT, 'src', 'i18n', 'en.json'), 'utf8'));
 const LANGS = ['en', 'fr', 'de', 'es', 'pt-BR', 'it', 'ru', 'tr'];
 const shotDir = join(ROOT, 'test-results');
@@ -43,7 +54,7 @@ mkdirSync(join(shotDir, 'traps'), { recursive: true });
 const PHONE = { viewport: { width: 640, height: 360 }, context: { hasTouch: true, isMobile: true, deviceScaleFactor: 1 } };
 
 // 0. static: the analyzer catches the soft-lock reported in the old level 1
-{
+if (GENERAL) {
   const old = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'softlock-old-level1.json'), 'utf8'));
   const spots = [...new Set(analyzeLevel(old).stuck.map((p) => `col ${p.x} row ${p.y}`))];
   log(spots.some((s) => /col (8[2-9]|9[0-4]) /.test(s)), 'soft-lock detector finds the reported pit in the OLD level 1 (cols 82-94)', spots.join('; '));
@@ -59,8 +70,9 @@ const levelInfo = {};
   const { page, errors, ctx } = await openGame(browser, url, PHONE);
   await page.evaluate(() => window.__DTTD.resetSave());
   const fpsAll = [];
-  for (const [lvl, r] of Object.entries(replays)) {
-    const level = Number(lvl);
+  for (const L of LEVELS) {
+    const level = L.id;
+    const r = replays[level];
     const res = await page.evaluate(({ level, rec }) => new Promise((resolve) => {
       const T = window.__DTTD;
       T.start(level, rec);
@@ -85,10 +97,11 @@ const levelInfo = {};
     levelInfo[level] = { realtimeSeconds: +res.secs.toFixed(1) };
     await page.waitForTimeout(400);
   }
-  const avg = fpsAll.reduce((a, b) => a + b, 0) / fpsAll.length;
-  perf(avg >= 50, 'steady frame rate during the real-time runs', `avg ${avg.toFixed(1)} fps, worst level ${Math.min(...fpsAll).toFixed(1)} fps (640×360, software WebGL)`);
+  const avg = fpsAll.reduce((a, b) => a + b, 0) / Math.max(1, fpsAll.length);
+  if (LEVELS.length) perf(avg >= 50, 'steady frame rate during the real-time runs', `avg ${avg.toFixed(1)} fps, worst level ${Math.min(...fpsAll).toFixed(1)} fps (640×360, software WebGL)`);
   const save = await page.evaluate(() => window.__DTTD.Save.get());
-  log(save.unlocked === 10 && Object.keys(save.completed).length === 10, 'progress saved: all 10 levels completed', JSON.stringify({ unlocked: save.unlocked }));
+  const ids = LEVELS.map((L) => L.id);
+  if (ids.length) log(ids.every((id) => save.completed[id]) && save.unlocked >= Math.min(ALL_LEVELS.length, Math.max(...ids) + 1), `progress saved: levels ${ids[0]}-${ids[ids.length - 1]} completed, the next one unlocked`, JSON.stringify({ unlocked: save.unlocked }));
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -133,7 +146,7 @@ const levelInfo = {};
     levelInfo[L.id] = { ...levelInfo[L.id], name: EN[L.name], width: L.map[0].length, winSeconds: +(w.final.levelTick / 60).toFixed(1), cpSeconds: cpTimes.map(Number),
       traps: L.trolls.map((t) => ({ name: t.name, type: t.type, hint: EN[t.hint] })) };
   }
-  log(traps === 86 && solved === 86 && killed === 86, 'all 86 traps: solution passes and the trap kills', `${solved}/86 solved, ${killed}/86 kill`);
+  if (LEVELS.length) log(traps === TRAP_TOTAL && solved === TRAP_TOTAL && killed === TRAP_TOTAL, `all ${TRAP_TOTAL} traps: solution passes and the trap kills`, `${solved}/${TRAP_TOTAL} solved, ${killed}/${TRAP_TOTAL} kill`);
   allErrors.push(...errors);
   await ctx.close();
 }
@@ -159,13 +172,13 @@ const levelInfo = {};
       if (ok) { await page.screenshot({ path: join(shotDir, 'traps', `L${String(L.id).padStart(2, '0')}-${t.id}-${t.type}.png`) }); shots++; }
     }
   }
-  log(shots === 86, 'phone 640×360: a screenshot of every trap in action', `${shots} screenshots in test-results/traps/`);
+  if (LEVELS.length) log(shots === TRAP_TOTAL, 'phone 640×360: a screenshot of every trap in action', `${shots} screenshots in test-results/traps/`);
   allErrors.push(...errors);
   await ctx.close();
 }
 
 // 3 + 4. hint highlight & lifecycle, the one-time instructions, no text after deaths
-{
+if (GENERAL) {
   const { page, errors, ctx } = await openGame(browser, url);
   const r = await page.evaluate(({ win1 }) => {
     const T = window.__DTTD;
@@ -199,11 +212,11 @@ const levelInfo = {};
     T.start(1); T.sim('', 2);
     out.tut2 = sc().hints.length;
     out.deathText = [];
-    for (let l = 1; l <= 10; l++) { T.start(l); for (let d = 0; d < 5; d++) { T.kill(); T.sim('', 30); } out.deathText.push(sc().hints.length); }
+    for (let l = 1; l <= T.levels; l++) { T.start(l); for (let d = 0; d < 5; d++) { T.kill(); T.sim('', 30); } out.deathText.push(sc().hints.length); }
     T.release();
     return out;
   }, { win1: replays[1].win });
-  const L4 = LEVELS[3];
+  const L4 = ALL_LEVELS[3];
   const want = [...L4.trolls].sort((a, b) => a.x - b.x)[0];
   const same = JSON.stringify([...r.highlight].sort()) === JSON.stringify([...want.danger].sort());
   log(r.fresh.enabled && r.first === EN[want.hint] && same, 'hint highlights exactly the dangerous tiles of the next trap', `${r.highlight.length} rect(s) ${JSON.stringify(r.highlight)} = danger ${JSON.stringify(want.danger)}`);
@@ -216,7 +229,7 @@ const levelInfo = {};
 }
 
 // 5 + 6. deaths, saving, checkpoints
-{
+if (GENERAL) {
   const { page, errors, ctx } = await openGame(browser, url);
   const r = await page.evaluate((levels) => {
     const T = window.__DTTD;
@@ -235,11 +248,11 @@ const levelInfo = {};
     out.deaths = T.Save.get().totalDeaths;
     T.release();
     return out;
-  }, LEVELS.map((L) => ({ id: L.id, cps: Math.floor((L.trolls.length - 1) / 3) })));
-  const okCp = r.cps.every((c) => c.count === (c.id >= 8 ? 3 : 2) && Math.abs(c.respawn - c.at) < 30 && c.idx === c.count - 1);
-  log(okCp, 'every level: a checkpoint after every 3 traps; a death respawns at the furthest one reached', r.cps.map((c) => `L${c.id}:${c.count}`).join(' '));
+  }, ALL_LEVELS.map((L) => ({ id: L.id, cps: cpsOf(L) })));
+  const okCp = r.cps.every((c) => c.count === cpsOf(ALL_LEVELS[c.id - 1]) && c.count >= Math.floor((ALL_LEVELS[c.id - 1].trolls.length - 1) / 3) && Math.abs(c.respawn - c.at) < 30 && c.idx === c.count - 1);
+  log(okCp, 'every level: a checkpoint after every 3 traps (and ≤ 200 tiles apart from level 11); a death respawns at the furthest one reached', r.cps.map((c) => `L${c.id}:${c.count}`).join(' '));
   log(r.restart.cpIdx === -1 && r.restart.x < 200, 'the restart button goes back to the very start', `x=${r.restart.x.toFixed(0)}`);
-  log(r.deaths === 10, 'death counter counts every death', `${r.deaths}`);
+  log(r.deaths === ALL_LEVELS.length, 'death counter counts every death', `${r.deaths}`);
   await page.evaluate(() => localStorage.setItem('dttd-save-v1', JSON.stringify({ unlocked: 7, totalDeaths: 321, levelDeaths: { 1: 3 }, completed: { 1: true, 6: true }, muted: true, tutorialSeen: true })));
   await page.reload();
   await page.waitForFunction(() => window.__DTTD);
@@ -251,12 +264,44 @@ const levelInfo = {};
     try { window.__DTTD.Save.addDeath(1); window.__DTTD.Save.setLang('de'); return 'ok'; } catch (e) { return String(e); } finally { Storage.prototype.setItem = orig; }
   });
   log(blocked === 'ok', 'blocked localStorage is handled', blocked);
+  // a save from before levels 11+ existed: level 10 finished (the old game capped `unlocked` at 10) → level 11 opens
+  await page.evaluate(() => localStorage.setItem('dttd-save-v1', JSON.stringify({ unlocked: 10, totalDeaths: 99, levelDeaths: { 10: 4 }, completed: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => [i, true])), muted: false, tutorialSeen: true, lang: 'en' })));
+  await page.reload();
+  await page.waitForFunction(() => window.__DTTD && window.__DTTD.game.scene.getScene('Boot').sys.settings.status >= 5);
+  const v10 = await page.evaluate(() => {
+    const T = window.__DTTD;
+    T.setManual(true);
+    T.scene('Select');
+    const sel = T.game.scene.getScene('Select');
+    const tile = (id) => sel.children.getByName(`level-${id}`);
+    const out = { unlocked: T.Save.get().unlocked, page: sel.page, l11: !!tile(11) && tile(11).list.length > 3 };
+    T.scene('Title');
+    const title = T.game.scene.getScene('Title');
+    const play = title.children.getByName('play');
+    play.emit('pointerdown'); play.emit('pointerup');
+    T.step(3);
+    out.playStarts = T.state()?.level;
+    return out;
+  });
+  log(v10.unlocked === 11 && v10.l11 && v10.page === 1 && v10.playStarts === 11, 'an old save that finished level 10 unlocks level 11: the level select opens on page 2 with it open, Play starts it', JSON.stringify(v10));
+  // the level select: pages of 10, every planned level shown (locked ones with a padlock), usable at 640×360
+  const sel = await page.evaluate(() => {
+    const T = window.__DTTD;
+    T.resetSave();
+    T.scene('Select');
+    const sc = T.game.scene.getScene('Select');
+    const shown = () => [...sc.children.list].filter((o) => /^level-\d+$/.test(o.name)).map((o) => Number(o.name.slice(6)));
+    const pages = [];
+    for (let p = 0; p < sc.pages; p++) { sc.setPage(p); T.step(1); pages.push(shown()); }
+    return { pages, count: sc.pages };
+  });
+  log(sel.count === 3 && sel.pages.every((p, i) => p.length === 10 && p[0] === i * 10 + 1), 'level select: 3 pages of 10 (all 30 planned levels shown, locked ones locked)', JSON.stringify(sel.pages.map((p) => `${p[0]}-${p[p.length - 1]}`)));
   allErrors.push(...errors);
   await ctx.close();
 }
 
 // 7. languages
-{
+if (GENERAL) {
   // the browser language is used by default
   const de = await openGame(browser, url, { context: { locale: 'de-DE' } });
   const d = await de.page.evaluate(() => window.__DTTD.lang());
@@ -319,7 +364,7 @@ const levelInfo = {};
       g.togglePause(); T.step(2); check(`${l} pause`, g.overlay.list); g.togglePause();
       // the longest hint of all levels in the hint box
       let longest = '';
-      for (let id = 1; id <= 10; id++) for (const tr of T.levelData(id).trolls) { const s = T.t(tr.hint); if (s.length > longest.length) longest = s; }
+      for (let id = 1; id <= T.levels; id++) for (const tr of T.levelData(id).trolls) { const s = T.t(tr.hint); if (s.length > longest.length) longest = s; }
       const box = g.showHintBox(longest);
       T.step(14);
       const tx = box.list[2];
@@ -339,9 +384,9 @@ const levelInfo = {};
 }
 
 // 8. the camera never hides the hero: edge arrow while the camera is frozen (level 8)
-{
+if (GENERAL) {
   const { page, errors, ctx } = await openGame(browser, url, PHONE);
-  const L8 = LEVELS[7];
+  const L8 = ALL_LEVELS[7];
   const freeze = L8.trolls.find((t) => t.type === 'camera-freeze');
   const rec = replays[8].traps[freeze.name].solve;
   const r = await page.evaluate(({ rec }) => {
@@ -357,7 +402,7 @@ const levelInfo = {};
 }
 
 // 9. layouts, touch, full jump, restart button
-{
+if (GENERAL) {
   const d = await openGame(browser, url, { viewport: { width: 1280, height: 720 } });
   await d.page.evaluate(() => { window.__DTTD.lang('en'); window.__DTTD.start(3); });
   await d.page.waitForTimeout(600);
@@ -427,6 +472,6 @@ log(bytes < 10 * 1024 * 1024, 'production build under 10 MB', `${(bytes / 1024 /
 await browser.close();
 server.close();
 const failed = results.filter((r) => !r.ok).length;
-writeFileSync(join(shotDir, 'selftest.json'), JSON.stringify({ date: new Date().toISOString(), passed: results.length - failed, failed, levels: levelInfo, results }, null, 2));
+writeFileSync(join(shotDir, `selftest${SHARD}.json`), JSON.stringify({ date: new Date().toISOString(), passed: results.length - failed, failed, levels: levelInfo, results }, null, 2));
 console.log(`\n${results.length - failed}/${results.length} checks passed`);
 process.exit(failed ? 1 : 0);

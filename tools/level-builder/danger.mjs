@@ -2,7 +2,7 @@
 // Shared by the level builder (which stores them as `danger` rects) and the validator
 // (which recomputes them and checks they match), so the highlight always equals the
 // trap's trigger area.
-export const ACTION_GROUP_KEYS = ['fall', 'pop', 'retract', 'move', 'chase', 'show', 'hide', 'toss', 'eat', 'activate'];
+export const ACTION_GROUP_KEYS = ['fall', 'pop', 'retract', 'move', 'chase', 'show', 'hide', 'toss', 'eat', 'activate', 'grow', 'belt', 'respawn', 'shove', 'magnet', 'g', 'g2'];
 
 /** Tiles of: the troll's trigger zones, groups those triggers touch or act on, groups that
  *  credit the troll, fake EXITs credited to it, and the hazards declared with it. */

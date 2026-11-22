@@ -20,7 +20,7 @@
  */
 
 /** H = a decoy hero sprite (no collision; the camera can follow it). */
-export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H';
+export type TileChar = '#' | '^' | 'v' | '<' | '>' | '=' | 'o' | '*' | 'F' | 'H' | '~' | '?';
 
 /** Is this map character a group id? */
 export function isGroupChar(ch: string): boolean {
@@ -83,6 +83,21 @@ export interface GroupDef {
   tint?: number;
   /** Blocks: one physics body per column (needed for `eat`). */
   columns?: boolean;
+  /** Blocks: a push button / pressure plate on top of the block (its colour); it sinks while stood on. */
+  button?: 'red' | 'green';
+  /** Blocks: the button hangs under the block (a ceiling switch you bonk from below). */
+  ceilButton?: boolean;
+  /** Blocks: a wooden crate: it falls, the hero pushes it by walking into it, it slides on ice, rides belts and
+   *  crushes the hero if it lands on him. 'still': looks like a crate but stays put. */
+  crate?: boolean | 'still';
+  /** Water (tile '~'): a current that pushes the swimmer (px/s, [x, y]). */
+  current?: [number, number];
+  /** Water: electrified (it kills) while it is visible; pair it with calm water shown in between. */
+  zap?: boolean;
+  /** A level extension's own settings for this group (src/game/ext): { kind: '…', … }. */
+  ext?: Record<string, unknown>;
+  /** Crates: where the crate can come to rest (tile offsets) – world states for the soft-lock analyzer. */
+  rest?: [number, number][];
 }
 
 export type Rect = [number, number, number, number]; // tile x, y, w, h
@@ -102,6 +117,12 @@ export interface TriggerWhen {
   start?: boolean;
   /** Fires when the trigger with this id has fired (use with delay). */
   after?: string;
+  /** With zone: fires when this crate (group) is in the zone instead of the hero. With crateZone: the hero's own
+   *  condition (zone / touch) and, at the same time, this crate in crateZone (both on a fragile bridge). */
+  crate?: string;
+  crateZone?: Rect;
+  /** A level extension's condition (src/game/ext); together with zone / touch both must hold. */
+  ext?: Record<string, unknown>;
 }
 
 export type CtrlMode = 'normal' | 'flip' | 'nojump' | 'autorun' | 'lag' | 'hiccup' | 'superjump' | 'turbo' | 'frozen' | 'flipjump';
@@ -139,6 +160,19 @@ export type Action =
   | { say: string; at: 'door' | 'hero' | [number, number]; ticks?: number }
   | { shake: number; ticks?: number }
   | { slowmo: number }
+  /** The (hidden) group appears column by column from the left at this speed (px/tick): a bridge building itself. */
+  | { grow: string; speed: number }
+  /** A crate goes back to its drawn place (visible, at rest). */
+  | { respawn: string }
+  /** A level extension's action (src/game/ext): ext = '<extension>.<verb>', g / g2 = groups it acts on (they are
+   *  highlighted with the trap), args = anything else it needs. */
+  | { ext: string; g?: string; g2?: string; args?: Record<string, unknown> }
+  /** A magnet pulls a crate up (on) or lets it fall again (off). */
+  | { magnet: string; on: boolean }
+  /** A crate starts sliding at this speed (px/tick; it keeps it on ice). */
+  | { shove: string; vx: number }
+  /** A conveyor group changes its speed (px/s, + = right; the arrows turn round). */
+  | { belt: string; speed: number }
   | { show: string }
   | { hide: string }
   | { scare: true };
@@ -157,6 +191,8 @@ export interface TriggerDef {
   /** Zone effect: `do` runs whenever the hero enters the zone, `undo` when he leaves it. */
   hold?: boolean;
   undo?: Action[];
+  /** With hold: the undo actions run this many ticks after the hero left (0 = at once). */
+  undoDelay?: number;
   /**
    * Keep the result after a checkpoint respawn: if this trigger's zone lies before the
    * checkpoint, its final state (door moved, floor gone …) is applied instantly when the
@@ -211,7 +247,7 @@ export interface LevelData {
   /** Every troll moment in the level (each must be referenced by a trigger/group/fake exit). */
   trolls?: TrollDef[];
   /** Decorations that show where a zone effect is (tile rects). */
-  decor?: { x: number; y: number; w: number; h: number; kind: 'bubble' }[];
+  decor?: { x: number; y: number; w: number; h: number; kind: 'bubble' | 'shadow' }[];
   /** Troll id credited when a fake EXIT (F) bites. */
   fakeExitTroll?: string;
   /** Per fake EXIT: tile x of the F → troll id (overrides fakeExitTroll). */

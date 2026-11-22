@@ -25,12 +25,12 @@ for (const [lv, p] of Object.entries(PLANS)) {
   if (only.length && !only.includes(level)) continue;
   const file = join(dir, `level-${String(level).padStart(2, '0')}.json`);
   const out = { win: null, cps: [], traps: {} };
-  const w = await runPlan(page, level, p.win);
+  const w = await runPlan(page, level, p.win, { maxTicks: 40000 });
   const okW = w.final.state === 'won';
   console.log(`L${level} win   : ${okW ? 'WON' : 'FAILED'} in ${(w.ticks / 60).toFixed(1)} s ${okW ? '' : pos(w.final)}`);
   if (okW) out.win = w.rec; else bad++;
   for (let i = 0; i < p.cps.length; i++) {
-    const c = await runPlan(page, level, p.cps[i], { checkpoint: i });
+    const c = await runPlan(page, level, p.cps[i], { checkpoint: i, maxTicks: 40000 });
     const ok = c.final.state === 'won';
     console.log(`L${level} cp ${i + 1}  : ${ok ? 'WON' : 'FAILED'} in ${(c.ticks / 60).toFixed(1)} s ${ok ? '' : pos(c.final)}`);
     if (ok) out.cps.push(c.rec); else { bad++; out.cps.push(null); }

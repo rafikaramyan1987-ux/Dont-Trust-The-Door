@@ -7,12 +7,12 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff' };
 
-/** Serve dist/ (the production build) on a free port. */
-export function serveDist() {
-  const dist = join(ROOT, 'dist');
-  if (!existsSync(join(dist, 'index.html'))) throw new Error('dist/ missing: run `npm run build` first');
+/** Serve dist/ (the production build; or another build / unpacked zip folder) on a free port. */
+export function serveDist(dir = process.env.DTTD_DIST ?? 'dist') {
+  const dist = dir.startsWith('/') ? dir : join(ROOT, dir);
+  if (!existsSync(join(dist, 'index.html'))) throw new Error(`${dir}/ missing: run the build first`);
   const server = createServer((req, res) => {
     let p = decodeURIComponent((req.url || '/').split('?')[0]);
     if (p.endsWith('/')) p += 'index.html';
@@ -59,10 +59,13 @@ export async function runPlan(page, level, plan, { stopOnDeath = true, maxTicks 
     let total = 0;
     outer: for (const [keys, until] of plan) {
       const cond = typeof until === 'number' ? null : new Function('s', `return (${until});`);
+      // "R+J?<condition>": hold R, and J while the condition holds (e.g. swim strokes whenever you sink)
+      const jk = keys.includes('+J?') ? new Function('s', `return (${keys.split('+J?')[1]});`) : null;
       let n = 0;
       for (;;) {
         if (typeof until === 'number' ? n >= until : cond(s)) break;
-        T.sim(keys, 1); push(keys); n++; total++;
+        const k = jk ? keys.split('+J?')[0] + (jk(s) ? 'J' : '') : keys;
+        T.sim(k, 1); push(k); n++; total++;
         s = T.state();
         if (s.state !== 'play') break outer;
         if (total > maxTicks) break outer;

@@ -30,6 +30,10 @@ export const PHYS = {
 
 /** Death → restart delay (ticks). 16 ticks ≈ 0.27 s. */
 export const RESTART_TICKS = 16;
+/** levels the game is planned to have (the level select shows them all; those not built yet stay locked) */
+export const PLANNED_LEVELS = 30;
+/** level-select page size */
+export const PAGE_SIZE = 10;
 
 export interface Palette {
   name: string;
@@ -118,6 +122,75 @@ export const PALETTES: Palette[] = [
     block: '#d8664a', blockLight: '#ea8a68', blockDark: '#b44a32',
     top: '#ffc84a', topLight: '#ffe590', outline: OUT, accent: '#5b8cff',
     hex: { bg: 0xffd1b0, accent: 0x5b8cff, ui: 0x2b2d42 },
+  },  {
+    name: 'Factory Floor',
+    bgTop: '#b8cbe0', bgBottom: '#e8f0f8', dot: 'rgba(30,60,100,0.13)',
+    block: '#7b8ba3', blockLight: '#97a6bc', blockDark: '#5f6e86',
+    top: '#ff9f43', topLight: '#ffc685', outline: OUT, accent: '#ff5e3a',
+    hex: { bg: 0xb8cbe0, accent: 0xff5e3a, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Warehouse',
+    bgTop: '#e6d3b8', bgBottom: '#fbf3e6', dot: 'rgba(110,70,30,0.13)',
+    block: '#a8784c', blockLight: '#c2956a', blockDark: '#875a33',
+    top: '#d9b778', topLight: '#efd7a2', outline: OUT, accent: '#3f8fd9',
+    hex: { bg: 0xe6d3b8, accent: 0x3f8fd9, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Lagoon',
+    bgTop: '#a9e4f2', bgBottom: '#e6fbff', dot: 'rgba(20,90,120,0.13)',
+    block: '#3f8fb0', blockLight: '#5fabc9', blockDark: '#2d6f8e',
+    top: '#7fe0c4', topLight: '#b8f5e2', outline: OUT, accent: '#ff7a59',
+    hex: { bg: 0xa9e4f2, accent: 0xff7a59, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Vault',
+    bgTop: '#d9d0ec', bgBottom: '#f5f1fc', dot: 'rgba(70,40,120,0.13)',
+    block: '#8e7a5c', blockLight: '#a8957a', blockDark: '#6e5c42',
+    top: '#e6c45a', topLight: '#f6df94', outline: OUT, accent: '#d94f8a',
+    hex: { bg: 0xd9d0ec, accent: 0xd94f8a, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Neon Night',
+    bgTop: '#4b4d7a', bgBottom: '#8d8fc0', dot: 'rgba(255,255,255,0.10)',
+    block: '#3c3f66', blockLight: '#565a88', blockDark: '#2a2d4c',
+    top: '#5ef0ff', topLight: '#b2f8ff', outline: OUT, accent: '#ff4fd8',
+    hex: { bg: 0x4b4d7a, accent: 0xff4fd8, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Giant Garden',
+    bgTop: '#cdeec0', bgBottom: '#f4fff0', dot: 'rgba(40,100,40,0.13)',
+    block: '#8a6a4a', blockLight: '#a68566', blockDark: '#6c4f33',
+    top: '#9ce06b', topLight: '#c8f5a2', outline: OUT, accent: '#ff6f91',
+    hex: { bg: 0xcdeec0, accent: 0xff6f91, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Windy Peaks',
+    bgTop: '#cfe6ff', bgBottom: '#f6fbff', dot: 'rgba(40,80,140,0.12)',
+    block: '#8c96a8', blockLight: '#a8b1c1', blockDark: '#6e788a',
+    top: '#eef4ff', topLight: '#ffffff', outline: OUT, accent: '#ff8a3d',
+    hex: { bg: 0xcfe6ff, accent: 0xff8a3d, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Haunted Manor',
+    bgTop: '#2e3350', bgBottom: '#6a6f99', dot: 'rgba(220,230,255,0.08)',
+    block: '#6e5a7e', blockLight: '#8a76a0', blockDark: '#4e3e5e',
+    top: '#9ee6c0', topLight: '#d2fbe6', outline: OUT, accent: '#ffb347',
+    hex: { bg: 0x2e3350, accent: 0xffb347, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Fireworks Night',
+    bgTop: '#3d3561', bgBottom: '#7b6fa8', dot: 'rgba(255,230,180,0.10)',
+    block: '#5b4a7a', blockLight: '#76649a', blockDark: '#41345c',
+    top: '#ff7b54', topLight: '#ffb38f', outline: OUT, accent: '#ffe066',
+    hex: { bg: 0x3d3561, accent: 0xffe066, ui: 0x2b2d42 },
+  },
+  {
+    name: 'Signpost Valley',
+    bgTop: '#d6f0d8', bgBottom: '#f6fff4', dot: 'rgba(40,110,60,0.12)',
+    block: '#b5835a', blockLight: '#cc9f78', blockDark: '#91623d',
+    top: '#79c86a', topLight: '#aee69c', outline: OUT, accent: '#e84a5f',
+    hex: { bg: 0xd6f0d8, accent: 0xe84a5f, ui: 0x2b2d42 },
   },
 ];
 

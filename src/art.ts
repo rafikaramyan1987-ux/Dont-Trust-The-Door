@@ -840,6 +840,27 @@ function drawTrapProps(scene: Phaser.Scene): void {
   ctx.fillStyle = '#ff5a5a'; ellipse(ctx, 16, 10, 2.5, 2.5); ctx.fill();
   add(scene, 'turret-mouth', c);
 
+  // wooden crates (plain and cracked)
+  for (const cracked of [false, true]) {
+    [c, ctx] = canvas(TILE, TILE);
+    rr(ctx, 1.5, 1.5, TILE - 3, TILE - 3, 4); ctx.fillStyle = '#c8894b'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = OUT; ctx.stroke();
+    ctx.strokeStyle = '#8f5a2b'; ctx.lineWidth = 2.5;
+    ctx.strokeRect(6, 6, TILE - 12, TILE - 12);
+    ctx.beginPath(); ctx.moveTo(7, 7); ctx.lineTo(TILE - 7, TILE - 7); ctx.stroke();
+    ctx.fillStyle = '#e0a868'; ctx.fillRect(8, 3.5, TILE - 16, 2);
+    if (cracked) { ctx.strokeStyle = OUT; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(10, 30); ctx.lineTo(16, 22); ctx.lineTo(13, 15); ctx.moveTo(16, 22); ctx.lineTo(25, 20); ctx.stroke(); }
+    add(scene, cracked ? 'crate-cracked' : 'crate', c);
+  }
+
+  // push buttons: a coloured cap on a steel base (drawn on top of a block; flipped for ceiling switches)
+  for (const [name, cap, light] of [['red', '#ff5a5a', '#ff9d9d'], ['green', '#4fd16a', '#9cf0ad']] as const) {
+    [c, ctx] = canvas(34, 14);
+    rr(ctx, 1, 9, 32, 5, 2); ctx.fillStyle = '#8d93a8'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+    rr(ctx, 5, 2, 24, 9, 4); ctx.fillStyle = cap; ctx.fill(); ctx.stroke();
+    rr(ctx, 9, 4, 10, 2.5, 1.2); ctx.fillStyle = light; ctx.fill();
+    add(scene, `plate-${name}`, c);
+  }
+
   // copycat frog (spiky, deadly)
   [c, ctx] = canvas(TILE, TILE);
   ctx.fillStyle = '#c9cfe0';
