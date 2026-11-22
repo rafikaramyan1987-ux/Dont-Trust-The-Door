@@ -5,10 +5,13 @@
 // - interstitial: requestAd('midgame') on Next of the level-clear card only (a level transition; never on menu /
 //   navigation buttons); the SDK paces them
 // - no Escape key (restricted keys); the language from systemInfo.locale, English otherwise
-// - rewarded: requestAd('rewarded'); the reward only on adFinished
+// - rewarded: requestAd('rewarded'); the reward on adFinished. An adError before adStarted (adsDisabled in Basic
+//   Launch / Kids mode / offline, unfilled, adblock, cooldown, other) gives the hint for free; adError after adStarted
+//   means the player closed the ad (no hint). Once ads are known to be unavailable (adsDisabled / unfilled / adblock
+//   from any request, or SDK.ad.hasAdblock() at boot) the bulb gives the hint directly, without the ad dialog
 // - pause + mute from adStarted to adFinished / adError; the SDK's muteAudio setting; a hidden page pauses
 // - language: user.systemInfo.locale; saves through the SDK's data module (same save format)
-import { BasePlatform, DEFAULT_POLICY, type AdPlace, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, DEFAULT_POLICY, rewardResult, type AdOutcome, type AdPlace, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export const CG_SDK_URL = 'https://sdk.crazygames.com/crazygames-sdk-v3.js';
 
@@ -24,7 +27,10 @@ interface CGSdk {
     settings?: { muteAudio?: boolean };
     addSettingsChangeListener?(cb: (s: { muteAudio?: boolean }) => void): void;
   };
-  ad: { requestAd(type: 'midgame' | 'rewarded', cb: { adStarted?: () => void; adFinished?: () => void; adError?: (e: unknown) => void }): void };
+  ad: {
+    requestAd(type: 'midgame' | 'rewarded', cb: { adStarted?: () => void; adFinished?: () => void; adError?: (e: unknown) => void }): void;
+    hasAdblock?(): Promise<boolean>;
+  };
   data?: { getItem(k: string): string | null; setItem(k: string, v: string): void };
   user?: { systemInfo?: { locale?: string } };
 }
@@ -41,6 +47,8 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
   private s: CGSdk | null = null;
   private playing = false;
   private loadingOn = false;
+  /** ads are unavailable in this session (Basic Launch / ads disabled, no fill, ad blocker): no ad dialog */
+  private adsOff = false;
 
   async init(timeoutMs = 4000): Promise<void> {
     this.watchVisibility();
@@ -54,6 +62,12 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
       s.game.addSettingsChangeListener?.((st) => {
         if (st.muteAudio !== undefined) this.setPortalMuted(st.muteAudio);
       });
+      // an ad blocker: rewarded ads cannot play, so the bulb gives the hint directly (never blocks the boot)
+      void Promise.race([Promise.resolve(s.ad.hasAdblock?.()), new Promise((r) => setTimeout(() => r(false), 2000))])
+        .then((blocked) => {
+          if (blocked === true) this.adsOff = true;
+        })
+        .catch(() => {});
     } catch {
       this.s = null;
     }
@@ -104,14 +118,26 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
   }
 
   get rewardedSupported(): boolean {
-    return !!this.s;
+    return !!this.s && !this.adsOff;
   }
 
-  private ad(type: 'midgame' | 'rewarded'): Promise<boolean> {
+  private ad(type: 'midgame' | 'rewarded'): Promise<AdOutcome> {
     const s = this.s;
-    if (!s) return Promise.resolve(false);
+    if (!s) return Promise.resolve('failed');
     return this.runAd((done, started) => {
-      s.ad.requestAd(type, { adStarted: started, adFinished: () => done(true), adError: () => done(false) });
+      let began = false;
+      s.ad.requestAd(type, {
+        adStarted: () => {
+          began = true;
+          started();
+        },
+        adFinished: () => done('completed'),
+        adError: (e) => {
+          const code = (e as { code?: string } | null)?.code;
+          if (code === 'adsDisabled' || code === 'unfilled' || code === 'adblock') this.adsOff = true;
+          done(began ? 'dismissed' : 'failed');
+        },
+      });
     });
   }
 
@@ -119,7 +145,7 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
     if (place !== 'next') return;
     await this.ad('midgame');
   }
-  async rewarded(): Promise<boolean> {
-    return this.ad('rewarded');
+  async rewarded(): Promise<RewardResult> {
+    return rewardResult(await this.ad('rewarded'));
   }
 }

@@ -5,11 +5,13 @@
 // (VITE_Y8_APP_ID / VITE_Y8_GAME_ID can override them at build time).
 // - interstitial: showAd({ type: 'next' }) on Next, { type: 'browse' } on Levels / Menu of the level-clear card (both
 //   are player clicks, never automatic); the SDK paces them (about one per 180 s); Y8 runs the pre-roll itself
-// - rewarded: showAd({ type: 'reward' }); beforeReward → showAdFn(); the reward only after adViewed
+// - rewarded: showAd({ type: 'reward' }); beforeReward → showAdFn(); the hint after adViewed; adDismissed (a real ad
+//   closed early) gives no hint; any other breakStatus (noAdPreloaded, frequencyCapped, notReady, timeout, error,
+//   ignored, other: no ad was shown) gives the hint for free
 // - pause + mute on a hidden page and on window blur (Y8 game requirements)
 // - pause + mute in beforeAd, resume in afterAd; adBreakDone / .catch / timeout settle each request exactly once
 // - pause + mute while the page is hidden; saves in localStorage
-import { BasePlatform, type AdPlace, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, rewardResult, type AdOutcome, type AdPlace, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export const Y8_SDK_URL = 'https://cdn.y8.com/minimal-sdk/2-0/y8.min.js';
 /** the game's public client IDs from the Y8 developer portal (VITE_Y8_APP_ID / VITE_Y8_GAME_ID override them) */
@@ -24,7 +26,7 @@ interface Y8ShowAdOptions {
   beforeReward?: (showAdFn: () => void) => void;
   adViewed?: () => void;
   adDismissed?: () => void;
-  adBreakDone?: (info: unknown) => void;
+  adBreakDone?: (info: { breakStatus?: string } | undefined) => void;
 }
 interface Y8Sdk {
   init(app: { appId: string; autoLogin: boolean }, ad: { gameId: string; preloadAdBreaks: string; sound: string; onReady: () => void }): unknown;
@@ -90,35 +92,39 @@ export class Y8Platform extends BasePlatform implements Platform {
     return this.sdk !== null;
   }
 
-  private show(type: 'next' | 'browse' | 'reward'): Promise<boolean> {
+  private show(type: 'next' | 'browse' | 'reward'): Promise<AdOutcome> {
     const s = this.sdk;
-    if (!s) return Promise.resolve(false);
+    if (!s) return Promise.resolve('failed');
     return this.runAd((done, started) => {
       let viewed = false;
+      let dismissed = false;
       const opts: Y8ShowAdOptions = {
         type,
         name: type === 'reward' ? 'hint' : type === 'next' ? 'level-complete' : 'level-select',
+        // an ad is really about to show: pause + mute here (Y8: in the callback, not before the call)
         beforeAd: () => started(),
         afterAd: () => {},
-        adBreakDone: () => done(type === 'reward' && viewed),
+        adBreakDone: (info) => {
+          const st = info?.breakStatus;
+          if (type !== 'reward') done(st === 'viewed' || st === 'dismissed' ? 'completed' : 'failed');
+          else if (viewed) done('completed');
+          else done(dismissed || st === 'dismissed' ? 'dismissed' : 'failed');
+        },
       };
       if (type === 'reward') {
-        opts.beforeReward = (showAdFn) => {
-          started();
-          showAdFn();
-        };
+        opts.beforeReward = (showAdFn) => showAdFn();
         opts.adViewed = () => (viewed = true);
-        opts.adDismissed = () => {};
+        opts.adDismissed = () => (dismissed = true);
       }
       const r = s.showAd(opts) as Promise<unknown> | undefined;
-      if (r && typeof r.then === 'function') r.catch(() => done(false));
+      if (r && typeof r.then === 'function') r.catch(() => done('failed'));
     });
   }
 
   async interstitial(place: AdPlace): Promise<void> {
     await this.show(place === 'next' ? 'next' : 'browse');
   }
-  async rewarded(): Promise<boolean> {
-    return this.show('reward');
+  async rewarded(): Promise<RewardResult> {
+    return rewardResult(await this.show('reward'));
   }
 }

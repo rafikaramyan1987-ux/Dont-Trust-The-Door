@@ -52,6 +52,8 @@ function start(): void {
     scale: { mode: Phaser.Scale.NONE, zoom: 1 / dpr },
     render: { antialias: true, roundPixels: false, preserveDrawingBuffer: Input.isTest, powerPreference: 'high-performance' },
     input: { activePointers: 4 },
+    // all sound is src/audio.ts (its own AudioContext); Phaser's sound manager would only open a second, unused one
+    audio: { noAudio: true },
     physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false, fps: 60, fixedStep: true } },
     fps: { target: 60, smoothStep: true },
     scene: [BootScene, TitleScene, SelectScene, GameScene],
@@ -72,6 +74,8 @@ function start(): void {
 async function boot(): Promise<void> {
   Portal.onPause = (p) => {
     PortalState.paused = p;
+    // an ad break (or a portal pause) is over: Safari may have suspended / interrupted the audio meanwhile
+    if (!p) Audio.resume();
     // YouTube: a pause stops everything (loop, rendering), not only the level
     if (Portal.policy.pauseLoop && game) {
       if (p) game.loop.sleep();

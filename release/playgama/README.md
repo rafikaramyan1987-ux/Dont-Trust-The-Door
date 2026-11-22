@@ -35,7 +35,7 @@ title, short description (≤ 160 characters), long description, controls (keybo
   `bridge.initialize()` before the game bundle loads; `playgama-bridge-config.json` beside `index.html`.
 - `game_ready` once the title can be used; `level_started` / `level_completed` / `level_failed`.
 - Interstitial (`showInterstitial`) on Next / Levels / Menu of the level-clear card; rewarded (`showRewarded`) for
-  the hint, granted only on the `rewarded` state; no timers of the game's own.
+  the hint, granted on the `rewarded` state (closed after `opened` without it: no hint; `failed` / unsupported: hint for free); no timers of the game's own.
 - Pause + mute on `PAUSE_STATE_CHANGED` and during ads; `isAudioEnabled` / `AUDIO_STATE_CHANGED`; saves only in
   `bridge.storage`; language only from `bridge.platform.language` (English otherwise); Escape is not used.
 - Sound is recorded mp3 files (no sound synthesized in code); in-game sound button.

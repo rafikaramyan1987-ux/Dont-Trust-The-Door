@@ -4,9 +4,11 @@
 //   - boot: the portal's ready signal once the title is shown (game_ready / loaded / loadingStop / SDK init)
 //   - language from the portal (mock: German) where the portal has one; saves in the portal's store where it has one
 //   - no ad during a level, after a death or on a restart; no pre-roll
-//   - the rewarded hint: the card asks first; the hint only when the SDK confirms the reward; "no ad" on a failure, an
-//     early close or a silent SDK (the game's own timeout); the game paused + muted during the ad and resumed with the
-//     player's own sound setting; never stuck; still one hint per level
+//   - the rewarded hint: the card asks first where an ad can be shown; the hint when the ad is watched AND whenever no
+//     ad could be shown (no fill, error, a silent SDK: the game's timeout, CrazyGames: ads disabled); no hint only when
+//     a real ad was closed early (then it can be tried again); the game paused + muted during the ad and resumed with
+//     the player's own sound setting; never stuck; still one hint per level; with the SDK missing the bulb gives the
+//     hint at once (no dialog)
 //   - interstitial only from Next / Levels on the level-clear card (GamePix: at most one per 2 minutes)
 //   - level started / completed / failed (Playgama), a death is not a failure; portal pause events and a hidden page
 //     pause + mute the game
@@ -166,23 +168,45 @@ async function run(build) {
     await G(() => window.__DTTD.pressHint());
     check(!(await overlayName()), 'still one hint per level: the bulb does nothing after it');
 
-    // 2. failures: no fill, closed early, silent SDK
-    // YouTube has no "ad started" signal: the game waits up to 60 s for a silent request (not run here)
-    for (const mode of build === 'youtube' ? ['fail', 'noreward'] : ['fail', 'noreward', 'hang']) {
+    // 2. a real ad closed before its end: no hint (the only case), the game resumes, the hint can be tried again
+    const waitClosed = () => page.waitForFunction(`(() => { const s = ${scene}; return !s.overlay; })()`, null, { timeout: 70000 }).catch(() => {});
+    {
       await startLevel(2);
-      await G((m) => (window.__mock.mode = m), mode);
+      await G(() => (window.__mock.mode = 'noreward'));
       await G(() => window.__DTTD.pressHint());
       await press('hintAdYes');
-      const tStart = Date.now();
-      await page.waitForFunction(`(() => { const s = ${scene}; return !s.overlay; })()`, null, { timeout: 12000 }).catch(() => {});
+      await waitClosed();
       await sleep(150);
       s = await st();
       const pp = await portal();
-      const box = await G(`(() => { const s = ${scene}; return s.hintBox ? s.hintBox.name : null; })()`);
-      check(!s.hintUsed && !pp.paused && !pp.muted && box === 'adNone', `${mode}: no hint, "No ad available right now, try again later", game resumed${mode === 'hang' ? ` (timeout after ${((Date.now() - tStart) / 1000).toFixed(1)} s)` : ''}`, JSON.stringify({ hintUsed: s.hintUsed, pp, box }));
+      const box = await G(`(() => { const s = ${scene}; return s.hintBox ? s.hintBox.name || 'box' : null; })()`);
+      check(!s.hintUsed && !box && !pp.paused && !pp.muted, 'a real ad closed early: no hint, no message, game resumed', JSON.stringify({ hintUsed: s.hintUsed, box, pp }));
       await G(() => window.__DTTD.pressHint());
-      check((await overlayName()) === 'hintAd', `${mode}: the hint can be tried again`);
+      check((await overlayName()) === 'hintAd', 'closed early: the hint can be tried again (the ad dialog again)');
       await press('hintAdNo');
+    }
+    // 3. no ad could be shown (no fill / error, a silent SDK: timeout, CrazyGames: ads disabled): the hint anyway
+    const fails = build === 'youtube' ? ['fail'] : build === 'crazygames' ? ['hang', 'disabled'] : ['fail', 'hang'];
+    for (const mode of fails) {
+      await startLevel(3);
+      await G((m) => (window.__mock.mode = m), mode);
+      await G(() => window.__DTTD.pressHint());
+      if ((await overlayName()) === 'hintAd') await press('hintAdYes');
+      const tStart = Date.now();
+      await waitClosed();
+      await page.waitForFunction(() => window.__DTTD.state()?.hintUsed, null, { timeout: 15000 }).catch(() => {});
+      s = await st();
+      const pp = await portal();
+      const label = { fail: 'no fill / SDK error', hang: 'silent SDK (timeout)', disabled: 'ads disabled (adsDisabled, Basic Launch)' }[mode];
+      check(s.hintUsed && s.hint && !pp.paused && !pp.muted, `${label}: the hint is given anyway, game resumed${mode === 'hang' ? ` (after ${((Date.now() - tStart) / 1000).toFixed(1)} s)` : ''}`, JSON.stringify({ hintUsed: s.hintUsed, pp }));
+    }
+    if (build === 'crazygames') {
+      // once CrazyGames refused an ad (adsDisabled / unfilled / adblock), the bulb skips the ad dialog
+      await startLevel(4);
+      const p1 = await portal();
+      await G(() => window.__DTTD.pressHint());
+      s = await st();
+      check(!p1.rewarded && s.hintUsed && s.hint && !(await overlayName()), 'after adsDisabled: no "watch an ad" dialog any more, the bulb gives the hint at once', JSON.stringify({ p1, hintUsed: s.hintUsed }));
     }
     check(!(await calls()).some((c) => /^(showInterstitial|interstitial|requestAd:midgame|showAd:next|showAd:browse|showAd$|requestInterstitialAd)/.test(c)), 'no interstitial anywhere so far');
   }
@@ -334,6 +358,39 @@ async function run(build) {
   server.close();
 }
 
+/** the portal's SDK fails to load (blocked, offline): the game runs, and the bulb gives the hint at once (no dialog) */
+async function noSdk(build) {
+  const dir = `dist-${build}`;
+  const { server, url } = await serveDist(dir);
+  const browser = await launch();
+  const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(String(e)));
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => route.abort());
+  console.log(`\n${build} (SDK blocked)`);
+  await page.goto(`${url}?test=1`);
+  const loaded = await page.waitForFunction(() => window.__DTTD && window.__DTTD.activeScenes().includes('Title'), null, { timeout: 30000 }).then(() => true, () => false);
+  const ok = (cond, msg, detail = '') => {
+    console.log(`  ${cond ? '✓' : '✗'} ${msg}${detail && !cond ? ` (${detail})` : ''}`);
+    if (!cond) failed++;
+    results.push({ build: `${build}-nosdk`, checks: [{ ok: !!cond, msg }] });
+  };
+  ok(loaded, 'the game loads without its SDK');
+  if (loaded) {
+    await page.evaluate(() => window.__DTTD.start(1));
+    await page.waitForFunction(() => window.__DTTD.state()?.state === 'play', null, { timeout: 10000 });
+    const p = await page.evaluate(() => window.__DTTD.portal());
+    await page.evaluate(() => window.__DTTD.pressHint());
+    const s = await page.evaluate(() => window.__DTTD.state());
+    const ov = await page.evaluate(() => { const g = window.__DTTD.game.scene.getScene('Game'); return g.overlay ? g.overlay.name : null; });
+    ok(!p.rewarded && s.hintUsed && s.hint && !ov, 'no SDK: the bulb gives the hint at once, no "watch an ad" dialog', JSON.stringify({ rewarded: p.rewarded, hintUsed: s.hintUsed, ov }));
+    ok(!pageErrors.length, 'no page errors', pageErrors.slice(0, 2).join(' | '));
+  }
+  await browser.close();
+  server.close();
+}
+
 for (const b of builds) {
   if (!existsSync(`${ROOT}/${b === 'web' ? 'dist' : `dist-${b}`}/index.html`)) {
     console.log(`${b}: build missing (npm run build${b === 'web' ? '' : `:${b}`})`);
@@ -341,6 +398,7 @@ for (const b of builds) {
     continue;
   }
   await run(b);
+  if (b !== 'web') await noSdk(b);
 }
 mkdirSync(`${ROOT}/test-results`, { recursive: true });
 writeFileSync(`${ROOT}/test-results/portals${only.length ? `-${only.join('-')}` : ''}.json`, JSON.stringify(results, null, 2));

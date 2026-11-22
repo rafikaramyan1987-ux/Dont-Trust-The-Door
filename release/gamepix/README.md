@@ -29,6 +29,6 @@ title, short description (≤ 160 characters), long description, controls (keybo
   check them in the form. The integration follows the public SDK file `https://integration.gamepix.com/sdk/v3/gamepix.sdk.js`.
 - `window.GamePixConfig = { lifecycle: 'manual' }` before the SDK; `loading(0..100)`, `loaded()` before the title,
   `gameStart()` at the first level, `updateLevel(n)`, `happyMoment()` at the end of the game.
-- `ads.interstitial()` on the level-clear card (at most one per 2 minutes); `ads.reward()` for the hint, granted only on
-  `success: true`; pause / resume and soundOff / soundOn events and a hidden page pause + mute the game.
+- `ads.interstitial()` on the level-clear card (at most one per 2 minutes); `ads.reward()` for the hint, granted on
+  `success: true` (false after the SDK's pause: the ad was closed early, no hint; no ad at all: hint for free); pause / resume and soundOff / soundOn events and a hidden page pause + mute the game.
 - Checked by `scripts/gamepix/check.mjs`.

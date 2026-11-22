@@ -1,5 +1,5 @@
 // The web build (GitHub Pages): no SDK, no ads, no network. Everything is a no-op; the hint is free.
-import { DEFAULT_POLICY, type KeyValueStore, type Platform } from './types';
+import { DEFAULT_POLICY, type KeyValueStore, type Platform, type RewardResult } from './types';
 
 export class WebPlatform implements Platform {
   readonly name = 'web' as const;
@@ -25,7 +25,7 @@ export class WebPlatform implements Platform {
   preroll(): null {
     return null;
   }
-  async rewarded(): Promise<boolean> {
-    return false;
+  async rewarded(): Promise<RewardResult> {
+    return 'unavailable';
   }
 }

@@ -12,7 +12,7 @@ import { Input, Keys } from '../input';
 import { Audio, SfxName } from '../audio';
 import { Save } from '../save';
 import { Portal, PortalState } from '../platform';
-import type { AdPlace } from '../platform/types';
+import type { AdPlace, RewardResult } from '../platform/types';
 import { EXTS } from '../game/ext';
 import type { MoveCtx } from '../game/ext/types';
 import { applyLayout, Layout } from '../layout';
@@ -1829,9 +1829,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * The bulb. Where the portal has rewarded ads, it asks "Watch an ad for the hint": the hint is given only when the
-   * SDK confirms the reward; otherwise "No ad available right now, try again later" and the hint stays unused. On the
-   * web build (and where rewarded ads are not supported) the hint is free. Still one hint per level.
+   * The bulb. Only when a rewarded ad can really be shown does it ask "Watch an ad for the hint". The hint is given
+   * when the ad is watched, and also whenever no ad could be shown (no fill, ads disabled, an ad blocker, an SDK error
+   * or a timeout). Only a player who closes a real ad before its end gets no hint (and can try again). Where no
+   * rewarded ad can be offered (the web build, a missing SDK, ads known to be unavailable) the hint comes at once,
+   * without the dialog. Still one hint per level.
    */
   pressHint(): void {
     if (this.hintUsed || this.state !== 'play' || this.adBusy) return;
@@ -1851,16 +1853,11 @@ export class GameScene extends Phaser.Scene {
     const yes = new Button(this, cx + 110, cy + 80, { w: 150, h: 64, icon: 'play', color: '#6fd36b' }, () => {
       if (this.adBusy) return;
       this.adBusy = true;
-      void Portal.rewarded().catch(() => false).then((ok) => {
+      void Portal.rewarded().catch((): RewardResult => 'unavailable').then((r) => {
         this.adBusy = false;
         if (!this.sys.isActive()) return;
         this.closeOverlay();
-        if (ok) this.useHint();
-        else {
-          const box = this.showHintBox(t('ui.adNone'));
-          box.setName('adNone');
-          this.tweens.add({ targets: box, alpha: 0, delay: 2600, duration: 400, onComplete: () => { box.destroy(); if (this.hintBox === box) this.hintBox = null; } });
-        }
+        if (r !== 'dismissed') this.useHint();
       });
     });
     no.setName('hintAdNo');

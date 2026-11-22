@@ -43,6 +43,8 @@ jobs:
       - run: node tests/run-selftest.mjs ${{ matrix.shard }}
       - if: matrix.shard == '--general'
         run: node tests/hint-fit.mjs
+      - if: matrix.shard == '--general'
+        run: node tests/audio.mjs
       # death / respawn / no-soft-lock test of the shard's levels (tests/respawn.mjs)
       - if: matrix.shard != '--general'
         run: node tests/respawn.mjs ${{ matrix.shard }}

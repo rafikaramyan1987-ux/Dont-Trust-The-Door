@@ -36,5 +36,5 @@ title, short description (≤ 160 characters), long description, controls (keybo
   in `<head>` before the game. `SDK_GAME_PAUSE` pauses + mutes, `SDK_GAME_START` resumes; a hidden page pauses too.
 - Pre-roll (`gdsdk.showAd()`) when the player presses Play (once per session), mid-rolls on Next / Levels / Menu of the
   level-clear card (always on a click, never during play); rewarded (`preloadAd('rewarded')`, `showAd('rewarded')`)
-  for the hint, granted only on `SDK_REWARDED_WATCH_COMPLETE`.
+  for the hint, granted on `SDK_REWARDED_WATCH_COMPLETE`; no preloaded ad → hint at once without the dialog; a rejected `showAd` → hint for free; an ad closed early → no hint.
 - Checked by `scripts/gamedistribution/check.mjs`.

@@ -33,7 +33,7 @@ title, short description (≤ 160 characters), long description, controls (keybo
   `loadingStop` around the boot; `gameplayStart` / `gameplayStop` around levels and the pause menu (never on a lost
   focus); `happytime()` only when the whole game is finished.
 - `requestAd('midgame')` only at the level transition (Next on the level-clear card), never on menu buttons; the SDK
-  paces it. `requestAd('rewarded')` for the hint, granted only on `adFinished`. Mute + pause from `adStarted` to
+  paces it. `requestAd('rewarded')` for the hint, granted on `adFinished`; an `adError` before `adStarted` (adsDisabled in Basic Launch, unfilled, adblock) gives the hint for free and the bulb skips the ad dialog from then on; closed after `adStarted`: no hint. Mute + pause from `adStarted` to
   `adFinished` / `adError`; `settings.muteAudio` is honoured; saves in the data module; language from
   `systemInfo.locale` (English otherwise); Escape is not used.
 - Enable "Progress Save / Data Module" in the submission form (the game saves through `SDK.data`).

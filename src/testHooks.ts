@@ -118,6 +118,8 @@ export function installTestHooks(game: Phaser.Game): void {
     pressHint() { scene().pressHint(); },
     portal() { return { name: Portal.name, rewarded: Portal.rewardedSupported, ...PortalState }; },
     audioState() { return { muted: Audio.muted, sysMuted: Audio.sysMuted, saved: Save.get().muted }; },
+    /** the audio engine itself (tests/audio.mjs drives it with a fake AudioContext) */
+    audioEngine() { return Audio; },
     levelData(id: number) { return LEVELS[id - 1]; },
     t,
     /** Switch language (as the picker does) and return the code in use. */

@@ -32,6 +32,6 @@ title, short description (≤ 160 characters), long description, controls (keybo
 - `https://cdn.y8.com/minimal-sdk/2-0/y8.min.js` async in `<head>`; `y8sdk.ready` listener + `emitReadyEvent()`;
   `init({ appId, autoLogin: true }, { gameId, preloadAdBreaks: 'on', sound: 'on', onReady })`.
 - `showAd({ type: 'next' })` on Next and `{ type: 'browse' }` on Levels / Menu of the level-clear card (player clicks
-  only); `showAd({ type: 'reward' })` for the hint, granted only on `adViewed`. Pause + mute in `beforeAd`, resume
+  only); `showAd({ type: 'reward' })` for the hint, granted on `adViewed` (`adDismissed`: no hint; noAdPreloaded / frequencyCapped / notReady / error: hint for free). Pause + mute in `beforeAd`, resume
   after the break; also pause + mute on a hidden page and on window blur. Y8 runs the pre-roll itself.
 - Checked by `scripts/y8/check.mjs`.
