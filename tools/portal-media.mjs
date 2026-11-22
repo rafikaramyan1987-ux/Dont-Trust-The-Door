@@ -1,13 +1,18 @@
-// Portal media from real play (the production build driven by the recorded replays of the new levels):
-//   submission-playgama/   cover-1920x1080.png, cover-1080x1920.png, cover-800x800.png
-//   submission-gamepix/    cover-1360x850.png, icon-256x256.png
-//   submission-y8/media/   screenshot-760x570-1..4.jpg, screenshot-1280x720-1..4.jpg, promo-landscape-1920x1080.jpg,
-//                          promo-portrait-1080x1920.jpg, promo-card-760x570.jpg, gameplay-1280x720.mp4 (~28 s)
-//   submission-crazygames/ cover-1920x1080.png, cover-800x1200.png, cover-800x800.png, icon-512x512.png,
-//                          trailer-1920x1080.mp4, trailer-1080x1920.mp4 (~20 s)
+// Store material for the portal forms, from real play (the production build driven by the recorded replays), into
+// release/store/:
+//   icon/          icon-256x256.png, icon-512x512.png, icon-1024x1024.png
+//   screenshots/   six gameplay screenshots of six different levels, 1920x1080 and 1280x720 (PNG)
+//   playgama/      cover-1920x1080.png, cover-1080x1920.png, cover-800x800.png
+//   gamepix/       cover-1360x850.png, icon-256x256.png
+//   crazygames/    cover-1920x1080.png, cover-800x1200.png, cover-800x800.png, video-landscape-1920x1080.mp4,
+//                  video-portrait-1080x1620.mp4 (19 s, no sound, starting on the cover)
+//   y8/            screenshot-760x570-1..4.jpg, screenshot-1280x720-1..4.jpg, promo-landscape-1920x1080.jpg,
+//                  promo-portrait-1080x1920.jpg, promo-card-760x570.jpg, gameplay-1280x720.mp4 (28 s)
+//   gamedistribution/ thumb-512x384.jpg, thumb-512x512.jpg, thumb-200x120.jpg, thumb-1280x720.jpg, thumb-1280x550.jpg
+//   youtube/       thumbnail-1x1-1080x1080.png, thumbnail-5x7-1000x1400.png, thumbnail-16x9-1920x1080.png
 // Every picture is a frame of the game rendered natively at the target size (no upscaling); covers and promos add
-// the game's title over the frame. Screenshots and videos show the traps of the new levels (L11+) as they fire.
-// Usage: npm run build && node tools/portal-media.mjs [--no-video]
+// the game's title over the frame (never on the small GameDistribution thumbnails or the YouTube thumbnails).
+// Usage: npm run build && npm run store [-- --no-video]
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -17,8 +22,7 @@ const args = new Set(process.argv.slice(2));
 const TMP = join(ROOT, '.tmp', 'portal-media');
 rmSync(TMP, { recursive: true, force: true });
 mkdirSync(TMP, { recursive: true });
-const DIRS = { playgama: 'submission-playgama', gamepix: 'submission-gamepix', y8: 'submission-y8/media', crazygames: 'submission-crazygames' };
-for (const d of Object.values(DIRS)) mkdirSync(join(ROOT, d), { recursive: true });
+const DIRS = { playgama: 1, gamepix: 1, y8: 1, crazygames: 1, gamedistribution: 1, youtube: 1 };
 const LEVEL_FILES = readdirSync(join(ROOT, 'src', 'levels')).filter((f) => f.endsWith('.json')).sort();
 const level = (id) => JSON.parse(readFileSync(join(ROOT, 'src', 'levels', LEVEL_FILES[id - 1]), 'utf8'));
 const replays = (id) => JSON.parse(readFileSync(join(ROOT, 'tests', 'replays', `level-${String(id).padStart(2, '0')}.json`), 'utf8'));
@@ -40,6 +44,7 @@ const browser = await launch();
 async function gamePage(w, h) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
+  page.setDefaultTimeout(120000);
   await page.goto(`${url}?test=1&boot=none`);
   await page.waitForFunction(() => window.__DTTD && window.__DTTD.game.scene.getScene('Boot').sys.settings.status >= 5);
   await page.evaluate(() => { window.__DTTD.resetSave(); window.__DTTD.lang('en'); window.__DTTD.setManual(true); });
@@ -107,7 +112,8 @@ async function shotAt(w, h, m, opts = {}) {
 
 /** the icon: the hero next to the EXIT at the end of level 11, the camera zoomed in */
 async function icon(size, out) {
-  const { ctx, page } = await gamePage(size * 2, size * 2);
+  // rendered at 2× (at most 1024 px: software WebGL is slow at bigger sizes), then scaled down
+  const { ctx, page } = await gamePage(Math.min(size * 2, 1024), Math.min(size * 2, 1024));
   await page.evaluate(() => {
     const T = window.__DTTD;
     const rec = null;
@@ -160,22 +166,50 @@ async function video(w, h, clips, out) {
 }
 
 // ---------------------------------------------------------------------------
-// covers / promos (a trap moment each, title over it)
-const P = (d, f) => join(ROOT, DIRS[d], f);
+const S = (...p) => join(ROOT, 'release', 'store', ...p);
+for (const d of ['icon', 'screenshots', ...Object.keys(DIRS)]) mkdirSync(S(d), { recursive: true });
+const P = (d, f) => S(d, f);
+/** a game frame without the title (thumbnails where text is not wanted), PNG or JPEG by the file name */
+async function plain(png, out) {
+  const tmp = join(TMP, `plain-${Date.now()}.png`);
+  writeFileSync(tmp, png);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', tmp, ...(out.endsWith('.jpg') ? ['-q:v', '2'] : []), out]);
+  console.log(out);
+}
+
+// the game icon (the hero at a door): every portal form asks for one
+await icon(512, S('icon', 'icon-512x512.png'));
+await icon(256, S('icon', 'icon-256x256.png'));
+await icon(1024, S('icon', 'icon-1024x1024.png'));
+
+// gameplay screenshots of the real game, six different levels, in play with the buttons (16:9 1920x1080 / 1280x720)
+const SHOTS = [MOMENTS[5], MOMENTS[1], MOMENTS[2], MOMENTS[4], MOMENTS[3], MOMENTS[0]];
+for (const [i, m] of SHOTS.entries()) {
+  for (const [w, h] of [[1920, 1080], [1280, 720]]) {
+    const { ctx, page } = await gamePage(w, h);
+    await moment(page, m, { hud: true });
+    const out = S('screenshots', `screenshot-${i + 1}-level-${String(m[0]).padStart(2, '0')}-${w}x${h}.png`);
+    await page.screenshot({ path: out, type: 'png' });
+    await ctx.close();
+    console.log(out);
+  }
+}
+
+// Playgama: square 800x800, portrait 1080x1920, landscape 1920x1080 (PNG/JPEG ≤ 10 MB)
 await cover(await shotAt(1920, 1080, MOMENTS[1]), 1920, 1080, P('playgama', 'cover-1920x1080.png'));
 await cover(await shotAt(1080, 1920, MOMENTS[2]), 1080, 1920, P('playgama', 'cover-1080x1920.png'));
 await cover(await shotAt(800, 800, MOMENTS[0]), 800, 800, P('playgama', 'cover-800x800.png'));
+// GamePix (its docs are not readable: the sizes its form used so far)
 await cover(await shotAt(1360, 850, MOMENTS[3]), 1360, 850, P('gamepix', 'cover-1360x850.png'));
 await icon(256, P('gamepix', 'icon-256x256.png'));
-await cover(await shotAt(1920, 1080, MOMENTS[3]), 1920, 1080, P('y8', 'promo-landscape-1920x1080.jpg'));
-await cover(await shotAt(1080, 1920, MOMENTS[1]), 1080, 1920, P('y8', 'promo-portrait-1080x1920.jpg'));
-await cover(await shotAt(760, 570, MOMENTS[4]), 760, 570, P('y8', 'promo-card-760x570.jpg'));
+// CrazyGames: landscape 1920x1080, portrait 800x1200, square 800x800 (consistent; no text but the title)
 await cover(await shotAt(1920, 1080, MOMENTS[2]), 1920, 1080, P('crazygames', 'cover-1920x1080.png'));
 await cover(await shotAt(800, 1200, MOMENTS[0]), 800, 1200, P('crazygames', 'cover-800x1200.png'));
 await cover(await shotAt(800, 800, MOMENTS[1]), 800, 800, P('crazygames', 'cover-800x800.png'));
-await icon(512, P('crazygames', 'icon-512x512.png'));
-
-// Y8 screenshots: four traps of the new levels, in play (with the buttons), 4:3 and 16:9
+// Y8 (docs.y8.com/studio/media): promos 1920x1080 / 1080x1920 / game card 760x570, screenshots 760x570 + 1280x720
+await cover(await shotAt(1920, 1080, MOMENTS[3]), 1920, 1080, P('y8', 'promo-landscape-1920x1080.jpg'));
+await cover(await shotAt(1080, 1920, MOMENTS[1]), 1080, 1920, P('y8', 'promo-portrait-1080x1920.jpg'));
+await cover(await shotAt(760, 570, MOMENTS[4]), 760, 570, P('y8', 'promo-card-760x570.jpg'));
 for (const [i, m] of MOMENTS.slice(0, 4).entries()) {
   for (const [w, h] of [[760, 570], [1280, 720]]) {
     const { ctx, page } = await gamePage(w, h);
@@ -186,12 +220,36 @@ for (const [i, m] of MOMENTS.slice(0, 4).entries()) {
     console.log(out);
   }
 }
+// GameDistribution (quality guidelines): JPG 512x384, 512x512, 200x120 (mandatory; no text on the small ones),
+// 1280x720 and 1280x550 (the title only on the large ones)
+await plain(await shotAt(512, 384, MOMENTS[1]), P('gamedistribution', 'thumb-512x384.jpg'));
+await plain(await shotAt(512, 512, MOMENTS[0]), P('gamedistribution', 'thumb-512x512.jpg'));
+await plain(await shotAt(200, 120, MOMENTS[2]), P('gamedistribution', 'thumb-200x120.jpg'));
+await cover(await shotAt(1280, 720, MOMENTS[3]), 1280, 720, P('gamedistribution', 'thumb-1280x720.jpg'));
+await cover(await shotAt(1280, 550, MOMENTS[5]), 1280, 550, P('gamedistribution', 'thumb-1280x550.jpg'));
+// YouTube Playables: a thumbnail in each aspect ratio (1:1, 5:7, 16:9 – pixel sizes are only in its private
+// developer portal), no branding or logos in thumbnails: game frames without the title
+await plain(await shotAt(1080, 1080, MOMENTS[0]), P('youtube', 'thumbnail-1x1-1080x1080.png'));
+await plain(await shotAt(1000, 1400, MOMENTS[2]), P('youtube', 'thumbnail-5x7-1000x1400.png'));
+await plain(await shotAt(1920, 1080, MOMENTS[1]), P('youtube', 'thumbnail-16x9-1920x1080.png'));
 
-// videos: level 14 from the start (28 s); trailers: level 19 / level 15 from their first checkpoint
+/** CrazyGames preview videos start on the static cover: 1 s of the cover, then the gameplay (no sound) */
+async function withCover(coverPng, clip, out) {
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-loop', '1', '-t', '1', '-i', coverPng, '-i', clip, '-filter_complex',
+    '[0:v]fps=30,format=yuv420p,setsar=1[a];[1:v]fps=30,format=yuv420p,setsar=1[b];[a][b]concat=n=2:v=1[v]', '-map', '[v]', '-an',
+    '-c:v', 'libx264', '-crf', '20', '-preset', 'medium', '-movflags', '+faststart', out]);
+  console.log(out);
+}
+
+// videos: Y8 gameplay (16:9, ≥ 1280x720, ≥ 15 s): level 14 from the start, 28 s; CrazyGames: landscape 1080p 16:9
+// and portrait 1080p 2:3, 15-20 s, no sound, starting on the cover
 if (!args.has('--no-video')) {
   await video(1280, 720, [{ level: 14, seconds: 28 }], P('y8', 'gameplay-1280x720.mp4'));
-  await video(1920, 1080, [{ level: 19, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1920x1080.mp4'));
-  await video(1080, 1920, [{ level: 15, cp: 0, seconds: 20 }], P('crazygames', 'trailer-1080x1920.mp4'));
+  await video(1920, 1080, [{ level: 19, cp: 0, seconds: 18 }], join(TMP, 'cg-landscape.mp4'));
+  await withCover(P('crazygames', 'cover-1920x1080.png'), join(TMP, 'cg-landscape.mp4'), P('crazygames', 'video-landscape-1920x1080.mp4'));
+  await video(1080, 1620, [{ level: 15, cp: 0, seconds: 18 }], join(TMP, 'cg-portrait.mp4'));
+  await cover(await shotAt(1080, 1620, MOMENTS[0]), 1080, 1620, join(TMP, 'cg-cover-1080x1620.png'));
+  await withCover(join(TMP, 'cg-cover-1080x1620.png'), join(TMP, 'cg-portrait.mp4'), P('crazygames', 'video-portrait-1080x1620.mp4'));
 }
 
 await browser.close();

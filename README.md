@@ -9,7 +9,7 @@ you swim in, keys and locks, lasers, shrinking and growing, wind, ghosts, firewo
 and solvable the second: you always see the hero, each trap has one machine-checked solution, and a
 checkpoint flag follows every three traps (from level 11 also never more than 200 tiles apart). Death
 restarts instantly; the death counter is always on screen. Playable in **8 languages**. Also built for
-the game portals Playgama, GamePix, Y8 and CrazyGames (see [Portal builds](#portal-builds)).
+the game portals Playgama, GamePix, Y8, CrazyGames, GameDistribution and YouTube Playables (see [Portal builds](#portal-builds)).
 
 Levels 11–20 follow a length table (each level 15% longer than the one before, with one more trap);
 levels **11–20 are done**, levels 21–30 are still to come (the level select already shows all 30).
@@ -497,7 +497,7 @@ URL parameters: `?level=4` jumps straight to a level, `?touch=1` forces the touc
 
 ## Tech
 
-- Vite + TypeScript + Phaser 3.90 (Arcade physics). Art, sound and music are generated in code.
+- Vite + TypeScript + Phaser 3.90 (Arcade physics). Art is generated in code; sound and music are recorded mp3 files (`public/audio/`, rendered from the synthesiser in `src/audio-synth.ts` with `npm run audio`).
 - Deterministic fixed 60 Hz simulation (Arcade stepped manually), so bot replays are frame-exact.
   Camera tricks (freeze, zoom, flip, darkness, strobe, smudge, look-back, seasick tilt, decoy) are
   presentation only and never change the simulation.
@@ -578,7 +578,7 @@ possessed furniture (18), bombs, fuses, cannons, mortars and fireworks (19), sig
   16–20 and the level-independent checks), each job well under an hour: `node tests/run-selftest.mjs
   --levels 11-15` / `--general`.
 - **`npm run test:portals`** – every portal build in a real browser with a mocked SDK (and the web build
-  with none): see [Portal builds](#portal-builds).
+  with none); **`npm run test:release`** – the upload zips at desktop and phone size: see [Portal builds](#portal-builds).
 
 Latest full run: **238/239 checks passed** – the one failure is the ≥ 50 fps check, which this
 sandbox (headless Chromium, software WebGL, no GPU) misses for every level, the old ones included (~40 fps); on CI it is
@@ -602,54 +602,51 @@ reported but not enforced.
 
 ## Portal builds
 
-One code base, five builds. Each is a Vite mode and an npm script; the mode sets `__PLATFORM__` and only
-that portal's code is bundled (`src/platform/`: one `Platform` interface – init, language, storage, game
-ready, level started / completed / failed, interstitial, rewarded, pause and mute events).
+One code base, seven builds. Each is a Vite mode; the mode sets `__PLATFORM__` and only that portal's code and SDK
+are in the build (`src/platform/`: one `Platform` interface – init, language, storage, first frame, game ready,
+level started / completed / failed, interstitial, pre-roll, rewarded, pause and mute events, and a per-portal
+`policy` for what its rules allow). No build ever shows another portal's ads. What each portal's current
+documentation asks for, with sources, and how the build complies: [`docs/portal-requirements.md`](docs/portal-requirements.md).
 
-| Build | Command | Output | SDK |
-|---|---|---|---|
-| web (GitHub Pages) | `npm run build` | `dist/` | **none: no SDK, no ads, no network request** |
-| Playgama | `npm run submission:playgama` | `submission-playgama/dont-trust-the-door-playgama-v1.zip` | Bridge `https://bridge.playgama.com/v2/stable/playgama-bridge.js`, first script in `<head>`; `bridge.initialize()` runs before the game bundle; `playgama-bridge-config.json` beside `index.html` |
-| GamePix | `npm run submission:gamepix` | `submission-gamepix/dont-trust-the-door-gamepix-v1.zip` | SDK v3, `lifecycle: 'manual'`: loading 0–100, `loaded()`, `gameStart()` |
-| Y8 | `npm run submission:y8` | `submission-y8/dont-trust-the-door-y8-v1.zip` | minimal SDK 2.0 from Y8's CDN; App ID `6aff479cc9841fd9d0e5db3e`, Game ID `294329` |
-| CrazyGames | `npm run submission:crazygames` | `submission-crazygames/dont-trust-the-door-crazygames-v1.zip` | SDK v3 |
+**`npm run release`** builds, zips and checks all six portals into `release/<portal>/dont-trust-the-door-<portal>.zip`
+(`npm run release -- y8 youtube` for some). Upload notes and form fields: `release/<portal>/README.md`; images,
+videos and the English / French listing texts: [`release/store/`](release/store/) (`npm run store` renders them).
 
-`npm run submission` builds and checks all four. Every zip has `index.html` at its root, relative paths only
-and no request except its own portal's SDK.
+| Build | Output | SDK and rules |
+|---|---|---|
+| web (GitHub Pages) | `dist/` | **none: no SDK, no ads, no network request** |
+| Playgama | `release/playgama/` | Bridge v2 first in `<head>`, `bridge.initialize()` before the game, `playgama-bridge-config.json`; Bridge storage and language; no Escape key |
+| GamePix | `release/gamepix/` | SDK v3, `lifecycle: 'manual'`: loading 0–100, `loaded()`, `gameStart()`, `updateLevel()`, `happyMoment()` |
+| Y8 | `release/y8/` | minimal SDK 2.0, App ID `6aff479cc9841fd9d0e5db3e`, Game ID `294329`; `showAd` next / browse / reward; pause on blur |
+| CrazyGames | `release/crazygames/` | SDK v3; midgame only at the level transition; `happytime` at the end of the game; data module; no Escape key |
+| GameDistribution | `release/gamedistribution/` | `GD_OPTIONS` + `main.min.js`; pre-roll on Play, mid-rolls on the level-clear card; game ID from `VITE_GD_GAME_ID` |
+| YouTube Playables | `release/youtube/` | `game_api/v1` first; firstFrameReady / gameReady; onPause / onResume (no Page Visibility API); cloud save; every aspect ratio (portrait layout) |
 
-**Y8 IDs:** the game's public client IDs from the Y8 developer portal (App ID `6aff479cc9841fd9d0e5db3e`, Game ID
-`294329`) are built into the Y8 zip; `VITE_Y8_APP_ID` / `VITE_Y8_GAME_ID` can override them.
+**Language and saves:** the player's own 🌐 choice wins; otherwise the portal's language if the game has it, else
+the browser's where the portal allows it (not on Playgama, CrazyGames or YouTube), else English. Saves use the
+portal's storage where there is one (Playgama Bridge storage, the CrazyGames data module, YouTube's cloud save),
+else `localStorage` – the same key and format as the web version. YouTube never keeps the language in the save.
 
-**Language and saves:** the player's own 🌐 choice wins; otherwise the portal's language if the game has it,
-else the browser's, else English. Saves use the portal's storage where there is one (Playgama Bridge storage,
-the CrazyGames data module), else `localStorage` – the same key and format as the web version.
-
-**Lifecycle:** `game_ready` / `loaded()` once the title screen is shown; level started when a level begins;
-level completed at the EXIT; level failed only when the player quits a level from the pause menu (a death is
-not a failure). The game pauses and mutes during ads, on the portal's pause event and while the page is
-hidden, and comes back with the player's own sound setting.
+**Sound:** recorded mp3 files in `public/audio/` (rendered once from the original synthesizer with
+`npm run audio`); the game never synthesizes sound at run time.
 
 **Ads (never in the web build):**
-- Interstitial only when the player presses **Next level** or **Levels / Menu** on the level-clear card –
-  never during a level, never after a death, never before level 1 is finished, no pre-roll. No timer of
-  our own: how often one shows is the SDK's call (GamePix: at most one per 2 minutes).
-- Rewarded hint: the bulb asks "Watch an ad for the hint" (8 languages); the hint is given only when the
-  SDK confirms the reward, otherwise "No ad available right now, try again later" and the hint stays
-  available. Where rewarded ads are not supported (and on the web) the hint is free. Still one hint per
-  level, no other rewards.
-- Every ad request settles exactly once: finished, closed, failed, or an 8-second timeout.
+- Interstitial when the player presses **Next level** (and, where the portal allows it, **Levels / Menu**) on the
+  level-clear card – never during a level, never after a death. GameDistribution also plays its pre-roll when the
+  player presses Play. No timer of our own: how often one shows is the SDK's call (GamePix: at most one per 2 minutes).
+- Rewarded hint: the bulb asks "Watch an ad for the hint" (8 languages); the hint is given only when the SDK
+  confirms the reward, otherwise "No ad available right now, try again later" and the hint stays available. Where
+  rewarded ads are not supported (and on the web) the hint is free. Still one hint per level, no other rewards.
+- The game pauses and mutes during every ad and comes back with the player's own sound setting. Every ad request
+  settles exactly once: finished, closed, failed, or a timeout.
 
-**Checks:** `scripts/<portal>/check.mjs` (zip layout, relative paths, size, the only allowed SDK origin, the
-portal's own requirements, the media sizes); `scripts/playgama/qa.mjs` runs the zip like Playgama's QA Tool
-(`?platform_id=qa_tool`: the `initialize` handshake, `game_ready`, level messages, Bridge storage, and the
-two failure paths); Playgama's own precheck is vendored (`scripts/playgama/precheck.mjs`).
-`tests/portals.mjs` runs every build in Chromium with a mocked SDK (`tests/portal-mocks.mjs`):
-interstitials only after a level clear, the rewarded hint only on a reward, pause + mute during ads, never
-stuck after a failed, dismissed or silent ad, portal pause events, hidden page, saves and language.
-
-**Media:** `npm run build && node tools/portal-media.mjs` renders every cover, screenshot, promo, icon and
-video from real play of the new levels (frames of the game at the exact target size; covers add the title).
-What goes into which form field: `submission-<portal>/README.md`.
+**Checks and tests:** `scripts/<portal>/check.mjs` (zip layout, relative paths, size and file limits, the only allowed
+SDK origin, the portal's own requirements); `scripts/playgama/qa.mjs` runs the zip like Playgama's QA Tool.
+`npm run test:portals` runs every build with a mocked SDK (`tests/portal-mocks.mjs`): ad places, rewards only on a
+reward, pause + mute, never stuck after a failed / dismissed / silent ad, portal pause and sound events, hidden page,
+Escape, saves and language. `npm run test:release` runs the actual upload zips at desktop size (1280×720) and on a
+phone (390×844, touch): loads, Play starts level 1, level 1 is completed, the simulated interstitial on Next pauses
+and silences the game and the game resumes, no console errors.
 
 ## Media
 

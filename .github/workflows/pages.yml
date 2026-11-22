@@ -2,6 +2,7 @@ name: Build & deploy to GitHub Pages
 
 # Builds the game and publishes dist/ to the `gh-pages` branch, which GitHub Pages serves
 # at https://<owner>.github.io/<repo>/ (Settings → Pages → "Deploy from a branch: gh-pages").
+# A playtest build in gh-pages:preview/ (https://<owner>.github.io/<repo>/preview/) is carried over.
 on:
   push:
     branches: [main]
@@ -32,6 +33,10 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # keep the playtest preview (gh-pages:preview/) when the live game is redeployed
+          if git fetch -q --depth=1 origin gh-pages 2>/dev/null && git cat-file -e FETCH_HEAD:preview 2>/dev/null; then
+            mkdir -p dist/preview && git archive FETCH_HEAD preview | tar -x -C dist
+          fi
           cd dist
           touch .nojekyll
           git init -q -b gh-pages

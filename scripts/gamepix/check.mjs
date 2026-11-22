@@ -1,8 +1,8 @@
 // Checks of the GamePix zip: the shared checks (index.html at the root, relative paths, size, only GamePix's SDK origin,
 // no other portal), then GamePix's: window.GamePixConfig = { lifecycle: 'manual' } before the SDK v3 script, both first
 // in <head> before the game bundle; loading / loaded / gameStart, pause / resume, interstitial / reward in the code;
-// the icon and cover. Usage: node scripts/gamepix/check.mjs [--no-media]
-import { checker, commonChecks, mediaChecks, SDK } from '../lib/portal.mjs';
+// the icon and cover. Usage: node scripts/gamepix/check.mjs
+import { checker, commonChecks, SDK } from '../lib/portal.mjs';
 
 const c = checker('GamePix zip checks');
 const { html, code } = commonChecks(c, 'gamepix', { maxMB: 50 });
@@ -21,9 +21,4 @@ for (const [needle, what] of [
   ['"resume"', 'resume event'],
   ['visibilitychange', 'hidden-page pause'],
 ]) c.check(!code.includes(needle), `${what} missing from the game code`, `${what} in the game code`);
-if (!process.argv.includes('--no-media'))
-  mediaChecks(c, 'submission-gamepix', [
-    ['icon-256x256.png', 256, 256, 1 << 20],
-    ['cover-1360x850.png', 1360, 850, 5 << 20],
-  ]);
 c.done();

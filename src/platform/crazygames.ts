@@ -1,11 +1,14 @@
 // CrazyGames HTML5 SDK v3 (https://docs.crazygames.com/sdk/). index.html loads
 // https://sdk.crazygames.com/crazygames-sdk-v3.js (CrazyGames build only); init() awaits SDK.init().
-// - loadingStart / loadingStop around the boot, gameplayStart / gameplayStop around levels, happytime on a clear
-// - interstitial: requestAd('midgame') on Next / Levels of the level-clear card; the SDK paces them
+// - loadingStart / loadingStop around the boot, gameplayStart / gameplayStop around levels and the pause menu (never
+//   on a lost focus), happytime only when the whole game is finished ("use sparingly")
+// - interstitial: requestAd('midgame') on Next of the level-clear card only (a level transition; never on menu /
+//   navigation buttons); the SDK paces them
+// - no Escape key (restricted keys); the language from systemInfo.locale, English otherwise
 // - rewarded: requestAd('rewarded'); the reward only on adFinished
 // - pause + mute from adStarted to adFinished / adError; the SDK's muteAudio setting; a hidden page pauses
 // - language: user.systemInfo.locale; saves through the SDK's data module (same save format)
-import { BasePlatform, type KeyValueStore, type Platform } from './types';
+import { BasePlatform, DEFAULT_POLICY, type AdPlace, type KeyValueStore, type Platform } from './types';
 
 export const CG_SDK_URL = 'https://sdk.crazygames.com/crazygames-sdk-v3.js';
 
@@ -34,6 +37,7 @@ declare global {
 
 export class CrazyGamesPlatform extends BasePlatform implements Platform {
   readonly name = 'crazygames' as const;
+  readonly policy = { ...DEFAULT_POLICY, esc: 'none' as const, browserLanguage: false, menuAds: false };
   private s: CGSdk | null = null;
   private playing = false;
   private loadingOn = false;
@@ -79,7 +83,8 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
     this.loading(100);
   }
   levelStarted(): void {}
-  levelCompleted(): void {
+  levelCompleted(_level: number, last: boolean): void {
+    if (!last) return;
     try {
       this.s?.game.happytime();
     } catch {
@@ -110,7 +115,8 @@ export class CrazyGamesPlatform extends BasePlatform implements Platform {
     });
   }
 
-  async interstitial(): Promise<void> {
+  async interstitial(place: AdPlace): Promise<void> {
+    if (place !== 'next') return;
     await this.ad('midgame');
   }
   async rewarded(): Promise<boolean> {

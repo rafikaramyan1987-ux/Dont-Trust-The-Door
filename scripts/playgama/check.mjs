@@ -11,11 +11,11 @@
 //    its WARNs must be the two explained ones (Phaser's licence-comment URLs; localStorage as the fallback store when
 //    Bridge storage is not available).
 // The QA Tool harness (?platform_id=qa_tool, the initialize handshake, game_ready) is scripts/playgama/qa.mjs.
-// Usage: node scripts/playgama/check.mjs [--no-media]
+// Usage: node scripts/playgama/check.mjs
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checker, commonChecks, mediaChecks, SDK } from '../lib/portal.mjs';
+import { checker, commonChecks, SDK } from '../lib/portal.mjs';
 
 const c = checker('Playgama zip checks');
 const { dir, html, code, entries } = commonChecks(c, 'playgama', { maxMB: 300 });
@@ -58,10 +58,4 @@ const EXPLAINED = [/^warn\s+1\.2\.5\s/, /^warn\s+3\.2\.1\s+localStorage/];
 const warns = lines.filter((l) => /^warn\s/.test(l));
 const unexplained = warns.filter((w) => !EXPLAINED.some((re) => re.test(w)));
 c.check(unexplained.length, `unexplained precheck WARN: ${unexplained.join(' | ')}`, `precheck WARNs: ${warns.length ? 'only the explained ones (licence-comment URLs in Phaser; localStorage fallback)' : 'none'}`);
-if (!process.argv.includes('--no-media'))
-  mediaChecks(c, 'submission-playgama', [
-    ['cover-1920x1080.png', 1920, 1080, 10 << 20],
-    ['cover-1080x1920.png', 1080, 1920, 10 << 20],
-    ['cover-800x800.png', 800, 800, 10 << 20],
-  ]);
 c.done();

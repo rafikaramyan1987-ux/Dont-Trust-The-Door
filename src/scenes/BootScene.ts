@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { generateTextures } from '../art';
 import { Input } from '../input';
+import { Portal } from '../platform';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -8,6 +9,8 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // the first frame (the loading screen) is on screen (YouTube: firstFrameReady)
+    Portal.firstFrame();
     generateTextures(this);
     const p = new URLSearchParams(window.location.search);
     const lvl = Number(p.get('level'));

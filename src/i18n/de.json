@@ -270,7 +270,7 @@
   "ui.back": "Zurück",
   "ui.beatGame": "DU HAST DIE TÜR BESIEGT!",
   "ui.chooseLevel": "WÄHLE EIN LEVEL",
-  "ui.controlsHelp": "Pfeile / WASD zum Bewegen · Leertaste zum Springen · Esc für Pause",
+  "ui.controlsHelp": "Pfeile / WASD zum Bewegen · Leertaste zum Springen · P für Pause",
   "ui.deathsLevel": "Tode in diesem Level: {n}",
   "ui.deathsNone": "Tode: 0 — kein einziges Mal?!",
   "ui.deathsTotal": "Tode insgesamt: {n}",
